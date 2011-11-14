@@ -38,6 +38,9 @@ LEVEL = {
   logservice.LOG_LEVEL_CRITICAL : 'CRITICAL',
 }
 
+PRECISION_MS = 100
+MAX_LATENCY_WIDTH = 100
+
 class MainHandler(webapp.RequestHandler):
     def get(self):
 
@@ -52,11 +55,11 @@ class MainHandler(webapp.RequestHandler):
         except ValueError:
           level = None
 
-        # max
+        # max_requests
         try: 
-          max = int(self.request.get('max'))
+          max_requests = int(self.request.get('max_requests'))
         except ValueError:
-          max = 100
+          max_requests = 100
 
         logging.debug("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%DEBUG")
         logging.info("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%INFO")
@@ -64,8 +67,9 @@ class MainHandler(webapp.RequestHandler):
         logging.error("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%ERROR")
         logging.critical("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%CRITICAL")
 
+        bucket={}
         found={}
-        count = max
+        count = max_requests
         for log in logservice.fetch(end_time_usec=None,
                                     min_log_level=level,
                                     include_app_logs=True,
@@ -79,21 +83,45 @@ class MainHandler(webapp.RequestHandler):
           data = pprint.pformat(vars(log))
           data = cgi.escape(data)
           #self.response.out.write('<br><pre>%s</pre><br>' % data)
+          latency = int(log.latency() / 1000 / PRECISION_MS)
+          bucket[latency] = bucket.get(latency, 0) + 1
 
           count -= 1
 	  if count == 0:
             break
 
         self.response.out.write("""
+          <html>
+            <head>
+              <title>Logservice %s %s</title>
+              <style>
+                BODY {
+                  font-family: arial;
+                }
+                pre.errmsg {
+                  background-color: #d9d9d9;
+                  padding: 0.4em 0.1em;
+                  margin: 0em;
+                }
+              </style>
+            </head>
+            <body>
+          """ % (app_identity.get_application_id(), version) )
+        self.response.out.write("""
+            </body>
+          </html>
+          """)
+        # --------------- FORM ---------------
+        self.response.out.write("""
           <fieldset style='background-color: #def'>
             <legend>Logs Filter</legend>
             <form action='/'>
               Application version: <input name='version' value='%s' size='20'><br>
-              Process logs for the <input name='max' value='%d' size='5'> most recent requests<br>
+              Process logs for the <input name='max_requests' value='%d' size='5'> most recent requests<br>
 
               Only include requests which contain at least one message at level
               <select name='level'>
-        """ % (version, max))
+        """ % (version, max_requests))
 
         for k, v in LEVEL.iteritems():
           if level == k:
@@ -110,8 +138,28 @@ class MainHandler(webapp.RequestHandler):
             </form>
           </fieldset>
           <br>""" % ())
+
+
+
+        # --------------- Latency ---------------
+        #bucket[1] = 10
+        #bucket[4] = 20
+        #bucket[4] = 30
+        scale = min(1, float(MAX_LATENCY_WIDTH) / max(bucket.values()))
+        self.response.out.write("""<h1>Latency Histogram</h1>
+                                <pre>""")
+        for k in range(0, max(bucket) + 1 ):
+          cnt = bucket.get(k, 0)
+          self.response.out.write('%10d requests %5d - %5d ms: %s<br>' % (cnt, k * PRECISION_MS, (k+1) * PRECISION_MS -1, '*' * int(scale * cnt)) )
+        self.response.out.write('</pre>')
+
+        # --------------- Errors ---------------
+        self.response.out.write("""<h1>Log message frequency</h1>""")
         for message in sorted(found, key=found.get, reverse=True):
-          self.response.out.write('<hr>Message count: <b>%d</b><br>Message: <b><pre>%s</pre></b><br>' % (found[message], message) )
+          self.response.out.write("""
+            Count: <b>%d</b><br>
+            <pre class='errmsg'>%s</pre><br>
+            """ % (found[message], cgi.escape(message)) )
 
 
 APP = webapp.WSGIApplication(
