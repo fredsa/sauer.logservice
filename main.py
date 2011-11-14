@@ -61,11 +61,11 @@ class MainHandler(webapp.RequestHandler):
         except ValueError:
           max_requests = 100
 
-        logging.debug("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%DEBUG")
-        logging.info("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%INFO")
-	logging.warning("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%WARNING")
-        logging.error("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%ERROR")
-        logging.critical("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%CRITICAL")
+        #logging.debug("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%DEBUG")
+        #logging.info("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%INFO")
+	#logging.warning("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%WARNING")
+        #logging.error("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%ERROR")
+        #logging.critical("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%CRITICAL")
 
         bucket={}
         found={}
@@ -97,6 +97,9 @@ class MainHandler(webapp.RequestHandler):
               <style>
                 BODY {
                   font-family: arial;
+                }
+                LEGEND {
+                  font-weight: bold;
                 }
                 pre.errmsg {
                   background-color: #d9d9d9;
