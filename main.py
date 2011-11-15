@@ -31,6 +31,7 @@ from google.appengine.api import app_identity
 from google.appengine.api import logservice
 
 LEVEL = {
+  ''                            : '(All logs)',
   logservice.LOG_LEVEL_DEBUG    : 'DEBUG',
   logservice.LOG_LEVEL_INFO     : 'INFO',
   logservice.LOG_LEVEL_WARNING  : 'WARNING',
@@ -59,7 +60,9 @@ class MainHandler(webapp.RequestHandler):
         try: 
           max_requests = int(self.request.get('max_requests'))
         except ValueError:
-          max_requests = 100
+          max_requests = 10
+
+        raw_logs = self.request.get('raw_logs')
 
         #logging.debug("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%DEBUG")
         #logging.info("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%INFO")
@@ -67,29 +70,8 @@ class MainHandler(webapp.RequestHandler):
         #logging.error("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%ERROR")
         #logging.critical("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%CRITICAL")
 
-        bucket={}
-        found={}
-        count = max_requests
-        for log in logservice.fetch(end_time_usec=None,
-                                    min_log_level=level,
-                                    include_app_logs=True,
-                                    #include_incomplete=True,
-                                    version_ids=[version]):
-          #self.response.out.write('%s<br>' % log)
-          for line in log.line_list():
-            message = "[%s] %s]" % ( LEVEL[line.level()], line.log_message() )
-            #self.response.out.write('[%s][%s] %s<br>' % (time.strftime('%Y-%m-%d %H:%M:%S %Z', time.localtime(line.time()/1000000)), line.level(), cgi.escape(str( message ))) )
-            found[message] = found.get(message, 0) + 1
-          data = pprint.pformat(vars(log))
-          data = cgi.escape(data)
-          #self.response.out.write('<br><pre>%s</pre><br>' % data)
-          latency = int(log.latency() / 1000 / PRECISION_MS)
-          bucket[latency] = bucket.get(latency, 0) + 1
 
-          count -= 1
-	  if count == 0:
-            break
-
+        # --------------- HTML Page ---------------
         self.response.out.write("""
           <html>
             <head>
@@ -110,10 +92,7 @@ class MainHandler(webapp.RequestHandler):
             </head>
             <body>
           """ % (app_identity.get_application_id(), version) )
-        self.response.out.write("""
-            </body>
-          </html>
-          """)
+
         # --------------- FORM ---------------
         self.response.out.write("""
           <fieldset style='background-color: #def'>
@@ -131,39 +110,105 @@ class MainHandler(webapp.RequestHandler):
             selected = 'selected'
           else:
             selected = ''
-          self.response.out.write("""<option value='%d' %s>%s</option>""" % (k, selected, v) )
+          self.response.out.write("""<option value='%s' %s>%s</option>""" % (k, selected, v) )
 
+        if raw_logs:
+          checked = 'checked'
+        else:
+          checked = ''
         self.response.out.write("""
               </select> or above<br>
  
+              <input type='checkbox' name='raw_logs' %s> Pretty print raw logs<br>
+
               <input type='submit' value='Submit'>
 
             </form>
           </fieldset>
-          <br>""" % ())
+          <br>""" % checked)
 
+
+        # --------------- Raw logs ---------------
+        if raw_logs:
+          self.response.out.write("""<h1>Raw logs</h1>""")
+
+        latency={}
+        found={}
+        count = max_requests
+        for log in logservice.fetch(end_time_usec=None,
+                                    min_log_level=level,
+                                    include_app_logs=True,
+                                    #include_incomplete=True,
+                                    version_ids=[version]):
+          #self.response.out.write('%s<br>' % log)
+
+          # --------------- Raw logs ---------------
+          if raw_logs:
+            data = pprint.pformat(vars(log))
+            data = cgi.escape(data)
+            self.response.out.write('<hr><pre>%s</pre><br>' % data)
+
+          if log.pending_time() > 0:
+            self.response.out.write('<pre>pending_time = %f</pre><br>' % log.pending_time())
+
+          for line in log.line_list():
+            message = "[%s] %s]" % ( LEVEL[line.level()], line.log_message() )
+            #self.response.out.write('[%s][%s] %s<br>' % (time.strftime('%Y-%m-%d %H:%M:%S %Z', time.localtime(line.time()/1000000)), line.level(), cgi.escape(str( message ))) )
+            found[message] = found.get(message, 0) + 1
+            # --------------- Raw logs ---------------
+            if raw_logs:
+              data = pprint.pformat(vars(line))
+              data = cgi.escape(data)
+              self.response.out.write('<pre>%s</pre><br>' % data)
+
+
+          index = int( (log.latency() - log.pending_time()) / 1000 / PRECISION_MS)
+          latency[index] = latency.get(index, 0) + 1
+
+          count -= 1
+	  if count == 0:
+            break
+
+        if raw_logs:
+          self.response.out.write('<hr>')
+
+        if len(latency) == 0:
+          self.response.out.write("""
+            No logs.
+            """)
+          return
 
 
         # --------------- Latency ---------------
-        #bucket[1] = 10
-        #bucket[4] = 20
-        #bucket[4] = 30
-        scale = min(1, float(MAX_LATENCY_WIDTH) / max(bucket.values()))
+        #latency[1] = 10
+        #latency[4] = 20
+        #latency[4] = 30
+        scale = min(1, float(MAX_LATENCY_WIDTH) / max(latency.values()))
         self.response.out.write("""<h1>Latency Histogram</h1>
                                 <pre>""")
-        for k in range(0, max(bucket) + 1 ):
-          cnt = bucket.get(k, 0)
+        for k in range(0, max(latency) + 1 ):
+          cnt = latency.get(k, 0)
           self.response.out.write('%10d requests %5d - %5d ms: %s<br>' % (cnt, k * PRECISION_MS, (k+1) * PRECISION_MS -1, '*' * int(scale * cnt)) )
         self.response.out.write('</pre>')
 
         # --------------- Errors ---------------
         self.response.out.write("""<h1>Log message frequency</h1>""")
-        for message in sorted(found, key=found.get, reverse=True):
+        if len(found) == 0:
           self.response.out.write("""
-            Count: <b>%d</b><br>
-            <pre class='errmsg'>%s</pre><br>
-            """ % (found[message], cgi.escape(message)) )
+            No messages.
+            """)
+        else:
+          for message in sorted(found, key=found.get, reverse=True):
+            self.response.out.write("""
+              Count: <b>%d</b><br>
+              <pre class='errmsg'>%s</pre><br>
+              """ % (found[message], cgi.escape(message)) )
 
+        # --------------- End of page ---------------
+        self.response.out.write("""
+            </body>
+          </html>
+          """)
 
 APP = webapp.WSGIApplication(
     [
