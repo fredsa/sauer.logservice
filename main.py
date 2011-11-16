@@ -73,7 +73,7 @@ class MainHandler(webapp.RequestHandler):
 
         #logging.debug("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%DEBUG")
         #logging.info("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%INFO")
-	#logging.warning("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%WARNING")
+        #logging.warning("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%WARNING")
         #logging.error("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%ERROR")
         #logging.critical("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%CRITICAL")
 
@@ -156,6 +156,9 @@ class MainHandler(webapp.RequestHandler):
         latency_cached={}
         latency_static={}
         latency_dynamic={}
+        resource_cached={}
+        resource_static={}
+        resource_dynamic={}
         pending={}
         found={}
         count = 0
@@ -184,19 +187,22 @@ class MainHandler(webapp.RequestHandler):
 
 
 
-          index = int( (log.latency() - log.pending_time()) / 1000 / precision_ms)
+          index = int( (log.latency() - log.pending_time()) / 1000 / precision_ms) 
           if log.response_size() == 0:
             latency_static[index] = latency_static.get(index, 0) + 1
+            resource_static[log.resource()] = resource_static.get(log.resource(), 0) + 1
           elif log.status() == 204:
             latency_cached[index] = latency_cached.get(index, 0) + 1
+            resource_cached[log.resource()] = resource_cached.get(log.resource(), 0) + 1
           else:
             latency_dynamic[index] = latency_dynamic.get(index, 0) + 1
+            resource_dynamic[log.resource()] = resource_dynamic.get(log.resource(), 0) + 1
             idx = int( log.pending_time() / 1000 / precision_ms)
             pending[idx] = pending.get(idx, 0) + 1
 
 
           count += 1
-	  if count == max_requests:
+          if count == max_requests:
             break
 
         if raw_logs:
@@ -210,12 +216,17 @@ class MainHandler(webapp.RequestHandler):
 
 
         # --------------- Latency ---------------
-        def show_latency(latency, name, comment):
+        def show_latency(latency, resource, name, comment):
           self.response.out.write("""<h1>Latency Histogram - %s</h1>""" % name)
           self.response.out.write("""<div class='comment'>%s</div>""" % comment)
           if len(latency) == 0:
             self.response.out.write('No logs')
             return
+
+          self.response.out.write("""<pre>""")
+          for res in sorted(resource, key=resource.get, reverse=True):
+            self.response.out.write("""%5d: %s<br>""" % (resource[res], res) )
+          self.response.out.write("""</pre>""")
 
           scale = min(1, float(MAX_LATENCY_WIDTH) / max(latency.values()))
           self.response.out.write("""<pre>""")
@@ -224,10 +235,10 @@ class MainHandler(webapp.RequestHandler):
             self.response.out.write('%10d requests [%5d - %5d ms]: %s<br>' % (cnt, k * precision_ms, (k+1) * precision_ms -1, '*' * int(scale * cnt)) )
           self.response.out.write('</pre>')
 
-        show_latency(latency_static,  'Static Requests',  'log.response_size() == 0')
-        show_latency(latency_cached,  'Cached Requests',  'log.status() == 204')
-	show_latency(latency_dynamic, 'Dynamic Requests', 'log.response_size() > 0 and log.status() != 204')
-        show_latency(pending,         'Pending Time',     '(Dynamic Requests Only)')
+        show_latency(latency_static,  resource_static,  'Static Requests',  'log.response_size() == 0 (i.e. includes 404s)')
+        show_latency(latency_cached,  resource_cached,  'Cached Requests',  'log.status() == 204')
+        show_latency(latency_dynamic, resource_dynamic, 'Dynamic Requests', 'log.response_size() > 0 and log.status() != 204')
+        show_latency(pending,         {},               'Pending Time',     '(Dynamic Requests Only)')
 
         # --------------- Errors ---------------
         self.response.out.write("""<h1>Log message frequency</h1>""")
