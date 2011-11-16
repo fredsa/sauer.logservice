@@ -91,6 +91,13 @@ class MainHandler(webapp.RequestHandler):
                 }
                 H1 {
                   font-size: 1.4em;
+                  margin: 1.9em 0em 0.2em 0em;
+                }
+                .comment {
+                  font-size: 0.7em;
+                  font-style: italic;
+                  color: #888;
+                  margin: 0em 0em .5em 0em;
                 }
               </style>
             </head>
@@ -193,8 +200,9 @@ class MainHandler(webapp.RequestHandler):
 
 
         # --------------- Latency ---------------
-        def show_latency(name, latency):
+        def show_latency(latency, name, comment):
           self.response.out.write("""<h1>Latency Histogram - %s</h1>""" % name)
+          self.response.out.write("""<div class='comment'>%s</div>""" % comment)
           if len(latency) == 0:
             self.response.out.write('No logs')
             return
@@ -206,10 +214,10 @@ class MainHandler(webapp.RequestHandler):
             self.response.out.write('%10d requests [%5d - %5d ms]: %s<br>' % (cnt, k * LATENCY_PRECISION_MS, (k+1) * LATENCY_PRECISION_MS -1, '*' * int(scale * cnt)) )
           self.response.out.write('</pre>')
 
-        show_latency('Static Requests', latency_static)
-        show_latency('Cached Requests', latency_cached)
-	show_latency('Dynamic Requests', latency_dynamic)
-        show_latency('Pending Time (Dynamic Requests Only)', pending)
+        show_latency(latency_static,  'Static Requests',  'log.response_size() == 0')
+        show_latency(latency_cached,  'Cached Requests',  'log.status() == 204')
+	show_latency(latency_dynamic, 'Dynamic Requests', 'log.response_size() > 0 and log.status() != 204')
+        show_latency(pending,         'Pending Time',     '(Dynamic Requests Only)')
 
         # --------------- Errors ---------------
         self.response.out.write("""<h1>Log message frequency</h1>""")
