@@ -39,8 +39,8 @@ LEVEL = {
   logservice.LOG_LEVEL_CRITICAL : 'CRITICAL',
 }
 
-LATENCY_PRECISION_MS = 100
-PENDING_PRECISION_MS = 10
+precision_ms = 100
+precision_ms = 10
 MAX_LATENCY_WIDTH = 100
 
 class MainHandler(webapp.RequestHandler):
@@ -62,6 +62,12 @@ class MainHandler(webapp.RequestHandler):
           max_requests = int(self.request.get('max_requests'))
         except ValueError:
           max_requests = 10
+
+        # precision_ms
+        try:
+          precision_ms = int(self.request.get('precision_ms'))
+        except ValueError:
+          precision_ms = 100
 
         raw_logs = self.request.get('raw_logs')
 
@@ -129,7 +135,11 @@ class MainHandler(webapp.RequestHandler):
           checked = ''
         self.response.out.write("""
               </select> or above<br>
+
+              Histogram precision: <input name='precision_ms' value='%s' size='5'>ms<br>
+          """ % precision_ms)
  
+        self.response.out.write("""
               <input type='checkbox' name='raw_logs' %s> Pretty print raw logs<br>
 
               <input type='submit' value='Submit'>
@@ -174,14 +184,14 @@ class MainHandler(webapp.RequestHandler):
 
 
 
-          index = int( (log.latency() - log.pending_time()) / 1000 / LATENCY_PRECISION_MS)
+          index = int( (log.latency() - log.pending_time()) / 1000 / precision_ms)
           if log.response_size() == 0:
             latency_static[index] = latency_static.get(index, 0) + 1
           elif log.status() == 204:
             latency_cached[index] = latency_cached.get(index, 0) + 1
           else:
             latency_dynamic[index] = latency_dynamic.get(index, 0) + 1
-            idx = int( log.pending_time() / 1000 / PENDING_PRECISION_MS)
+            idx = int( log.pending_time() / 1000 / precision_ms)
             pending[idx] = pending.get(idx, 0) + 1
 
 
@@ -211,7 +221,7 @@ class MainHandler(webapp.RequestHandler):
           self.response.out.write("""<pre>""")
           for k in range(0, max(latency) + 1 ):
             cnt = latency.get(k, 0)
-            self.response.out.write('%10d requests [%5d - %5d ms]: %s<br>' % (cnt, k * LATENCY_PRECISION_MS, (k+1) * LATENCY_PRECISION_MS -1, '*' * int(scale * cnt)) )
+            self.response.out.write('%10d requests [%5d - %5d ms]: %s<br>' % (cnt, k * precision_ms, (k+1) * precision_ms -1, '*' * int(scale * cnt)) )
           self.response.out.write('</pre>')
 
         show_latency(latency_static,  'Static Requests',  'log.response_size() == 0')
