@@ -39,7 +39,8 @@ LEVEL = {
   logservice.LOG_LEVEL_CRITICAL : 'CRITICAL',
 }
 
-PRECISION_MS = 100
+LATENCY_PRECISION_MS = 100
+PENDING_PRECISION_MS = 10
 MAX_LATENCY_WIDTH = 100
 
 class MainHandler(webapp.RequestHandler):
@@ -88,6 +89,9 @@ class MainHandler(webapp.RequestHandler):
                   padding: 0.4em 0.1em;
                   margin: 0em;
                 }
+                H1 {
+                  font-size: 1.4em;
+                }
               </style>
             </head>
             <body>
@@ -132,9 +136,12 @@ class MainHandler(webapp.RequestHandler):
         if raw_logs:
           self.response.out.write("""<h1>Raw logs</h1>""")
 
-        latency={}
+        latency_cached={}
+        latency_static={}
+        latency_dynamic={}
+        pending={}
         found={}
-        count = max_requests
+        count = 0
         for log in logservice.fetch(end_time_usec=None,
                                     min_log_level=level,
                                     include_app_logs=True,
@@ -148,9 +155,6 @@ class MainHandler(webapp.RequestHandler):
             data = cgi.escape(data)
             self.response.out.write('<hr><pre>%s</pre><br>' % data)
 
-          if log.pending_time() > 0:
-            self.response.out.write('<pre>pending_time = %f</pre><br>' % log.pending_time())
-
           for line in log.line_list():
             message = "[%s] %s]" % ( LEVEL[line.level()], line.log_message() )
             #self.response.out.write('[%s][%s] %s<br>' % (time.strftime('%Y-%m-%d %H:%M:%S %Z', time.localtime(line.time()/1000000)), line.level(), cgi.escape(str( message ))) )
@@ -162,17 +166,26 @@ class MainHandler(webapp.RequestHandler):
               self.response.out.write('<pre>%s</pre><br>' % data)
 
 
-          index = int( (log.latency() - log.pending_time()) / 1000 / PRECISION_MS)
-          latency[index] = latency.get(index, 0) + 1
 
-          count -= 1
-	  if count == 0:
+          index = int( (log.latency() - log.pending_time()) / 1000 / LATENCY_PRECISION_MS)
+          if log.response_size() == 0:
+            latency_static[index] = latency_static.get(index, 0) + 1
+          elif log.status() == 204:
+            latency_cached[index] = latency_cached.get(index, 0) + 1
+          else:
+            latency_dynamic[index] = latency_dynamic.get(index, 0) + 1
+            idx = int( log.pending_time() / 1000 / PENDING_PRECISION_MS)
+            pending[idx] = pending.get(idx, 0) + 1
+
+
+          count += 1
+	  if count == max_requests:
             break
 
         if raw_logs:
           self.response.out.write('<hr>')
 
-        if len(latency) == 0:
+        if count == 0:
           self.response.out.write("""
             No logs.
             """)
@@ -180,16 +193,23 @@ class MainHandler(webapp.RequestHandler):
 
 
         # --------------- Latency ---------------
-        #latency[1] = 10
-        #latency[4] = 20
-        #latency[4] = 30
-        scale = min(1, float(MAX_LATENCY_WIDTH) / max(latency.values()))
-        self.response.out.write("""<h1>Latency Histogram</h1>
-                                <pre>""")
-        for k in range(0, max(latency) + 1 ):
-          cnt = latency.get(k, 0)
-          self.response.out.write('%10d requests %5d - %5d ms: %s<br>' % (cnt, k * PRECISION_MS, (k+1) * PRECISION_MS -1, '*' * int(scale * cnt)) )
-        self.response.out.write('</pre>')
+        def show_latency(name, latency):
+          self.response.out.write("""<h1>Latency Histogram - %s</h1>""" % name)
+          if len(latency) == 0:
+            self.response.out.write('No logs')
+            return
+
+          scale = min(1, float(MAX_LATENCY_WIDTH) / max(latency.values()))
+          self.response.out.write("""<pre>""")
+          for k in range(0, max(latency) + 1 ):
+            cnt = latency.get(k, 0)
+            self.response.out.write('%10d requests [%5d - %5d ms]: %s<br>' % (cnt, k * LATENCY_PRECISION_MS, (k+1) * LATENCY_PRECISION_MS -1, '*' * int(scale * cnt)) )
+          self.response.out.write('</pre>')
+
+        show_latency('Static Requests', latency_static)
+        show_latency('Cached Requests', latency_cached)
+	show_latency('Dynamic Requests', latency_dynamic)
+        show_latency('Pending Time (Dynamic Requests Only)', pending)
 
         # --------------- Errors ---------------
         self.response.out.write("""<h1>Log message frequency</h1>""")
