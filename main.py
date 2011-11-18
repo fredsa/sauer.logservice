@@ -51,26 +51,8 @@ TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
 class Result(db.Model):
   start_minute = db.IntegerProperty()
   requests = db.ListProperty(int)
-
-class PipelineHandler(webapp.RequestHandler):
-    def get(self):
-        results = Result.all()
-        for result in results:
-          self.response.out.write('%s: %s<br>' % (result.start_minute, result.requests) )
-
-        self.response.out.write('-----------------------------------------------<br>')
-
-        now_s = time.time()
-        start_time_usec = (now_s - 1 * 60 * 60) * 1e6
-        end_time_usec = now_s * 1e6
-
-        pipeline = MyPipeline(start_time_usec, end_time_usec)
-        logging.info('************************************************************************************************************************************************')
-        logging.info('*************************************************************** pipeline.start() ***************************************************************')
-        logging.info('************************************************************************************************************************************************')
-        pipeline.start()
-
-        self.response.out.write('Done.<br>')
+  blob_key = db.StringProperty()
+  url = db.StringProperty()
 
 class MyPipeline(base_handler.PipelineBase):
 
@@ -95,15 +77,15 @@ class MyPipeline(base_handler.PipelineBase):
 def my_map(log):
   """My map function."""
 
-  logging.info('--------------------------------------- Got something ----------------------------------')
+  logging.info('--------------------------------------- Map Something ----------------------------------')
   data = pprint.pformat(vars(log))
   data = cgi.escape(data)
-  #logging.info('--------------------------------------- Got:\n%s' % data)
   start_time_s = int(log.start_time() / 1e6)
   yield(start_time_s, 1)
 
 def my_reduce(key, values):
   """Word Count reduce function."""
+
   logging.info('--------------------------------------- REDUCE: key=%s, values=%s ----------------------------------' % (key, values) )
   yield "%s,%d\n" % (key, len(values))
 
@@ -112,19 +94,12 @@ class StoreOutput(base_handler.PipelineBase):
   """
 
   def run(self, mr_kind, start_time_usec, end_time_usec, blob_keys):
+    hostname = app_identity.get_default_version_hostname()
+    if not hostname:
+      hostname = "localhost:8080"
     for blob_key in blob_keys: 
-      logging.info("********************************************** StoreOutput.run(self, mr_kind=%s, start_time_usec=%d, end_time_usec=%d, blob_keys=%s) url = http://localhost:8080%s" % (mr_kind, start_time_usec, end_time_usec, blob_key, blob_key) )
-      count = 0
-      for log in logservice.fetch(start_time_usec=start_time_usec,
-                                  end_time_usec=end_time_usec,
-                                  #min_log_level=None,
-                                  #include_app_logs=True,
-                                  ##include_incomplete=True,
-                                  #version_ids=None
-                                 ):
-        count += 1
-      logging.info('################# count = %s' % count)
-      url = "http://%s%s" % (app_identity.get_default_version_hostname(), blob_key)
+      url = "http://%s%s" % (hostname, blob_key)
+      logging.info("********************************************** StoreOutput.run(self, mr_kind=%s, start_time_usec=%d, end_time_usec=%d, blob_keys=%s) url = %s" % (mr_kind, start_time_usec, end_time_usec, blob_key, url) )
       db.put(Result(blob_key=blob_key, url=url))
 
 
@@ -226,7 +201,7 @@ class MainHandler(webapp.RequestHandler):
             <body>
           """ % (app_identity.get_application_id(), version) )
 
-        # --------------- FORM ---------------
+        # --------------- 1st FORM ---------------
         self.response.out.write("""
           <fieldset style='background-color: #def'>
             <legend>Logs Filter</legend>
@@ -267,11 +242,55 @@ class MainHandler(webapp.RequestHandler):
         self.response.out.write("""
               <input type='checkbox' name='raw_logs' %s> Pretty print raw logs<br>
 
-              <input type='submit' value='Submit'>
+              <input type='submit' value='Summarize'>
 
             </form>
           </fieldset>
           <br>""" % checked)
+
+        # --------------- 2nd FORM ---------------
+        self.response.out.write("""
+          <fieldset style='background-color: #def'>
+            <legend>Logs MapReduce</legend>
+            <form action='/'>
+        """)
+
+        self.response.out.write("""
+             Only include requests between <input name='start_time_str' value='%s' size='20'>
+             and <input name='end_time_str' value='%s' size='20'><br>
+          """ % (start_time_str, end_time_str))
+ 
+ 
+        self.response.out.write("""
+              <input type='submit' value='Kick Off MapReduce'>
+
+            </form>
+          </fieldset>
+          <br>""")
+
+
+        # --------------- MapReduce results ---------------
+        self.response.out.write("""<h1>MapReduce results</h1>""")
+        results = Result.all()
+        for result in results:
+          url = result.url
+          t = pprint.pformat(db.to_dict(result))
+          t = t.replace(url, "<a href='%s'>%s</a>" % (url, url))
+          self.response.out.write('<pre>%s</pre>' % url)
+          self.response.out.write('<pre>%s</pre>' % t)
+
+        self.response.out.write('-----------------------------------------------<br>')
+
+        now_s = time.time()
+        start_time_usec = (now_s - 1 * 60 * 60) * 1e6
+        end_time_usec = now_s * 1e6
+
+        pipeline = MyPipeline(start_time_usec, end_time_usec)
+        logging.info('************************************************************************************************************************************************')
+        logging.info('*************************************************************** pipeline.start() ***************************************************************')
+        logging.info('************************************************************************************************************************************************')
+        pipeline.start()
+
 
 
         # --------------- Raw logs ---------------
@@ -404,7 +423,6 @@ class MainHandler(webapp.RequestHandler):
 APP = webapp.WSGIApplication(
     [
         ('/', MainHandler),
-        ('/pipe', PipelineHandler),
         (r'/blobstore/(.*)', DownloadHandler),
     ],
     debug=True)
