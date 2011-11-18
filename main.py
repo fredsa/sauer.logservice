@@ -20,6 +20,7 @@ import urllib
 import cgi
 import pprint
 import time
+import calendar
 import os
 
 from google.appengine.ext import webapp
@@ -30,6 +31,11 @@ from google.appengine.ext.webapp import blobstore_handlers
 from google.appengine.api import app_identity
 from google.appengine.api import logservice
 
+from mapreduce import base_handler
+from mapreduce import mapreduce_pipeline
+#from mapreduce import operation as op
+#from mapreduce import shuffler
+
 LEVEL = {
   ''                            : '(All logs)',
   logservice.LOG_LEVEL_DEBUG    : 'DEBUG',
@@ -39,9 +45,102 @@ LEVEL = {
   logservice.LOG_LEVEL_CRITICAL : 'CRITICAL',
 }
 
-precision_ms = 100
-precision_ms = 10
 MAX_LATENCY_WIDTH = 100
+TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
+
+class Result(db.Model):
+  start_minute = db.IntegerProperty()
+  requests = db.ListProperty(int)
+
+class PipelineHandler(webapp.RequestHandler):
+    def get(self):
+        results = Result.all()
+        for result in results:
+          self.response.out.write('%s: %s<br>' % (result.start_minute, result.requests) )
+
+        self.response.out.write('-----------------------------------------------<br>')
+
+        now_s = time.time()
+        start_time_usec = (now_s - 1 * 60 * 60) * 1e6
+        end_time_usec = now_s * 1e6
+
+        pipeline = MyPipeline(start_time_usec, end_time_usec)
+        logging.info('************************************************************************************************************************************************')
+        logging.info('*************************************************************** pipeline.start() ***************************************************************')
+        logging.info('************************************************************************************************************************************************')
+        pipeline.start()
+
+        self.response.out.write('Done.<br>')
+
+class MyPipeline(base_handler.PipelineBase):
+
+  def run(self, start_time_usec, end_time_usec):
+    logging.info('*********************************** MyPipeline.run(self, %d, %d)' % (start_time_usec, end_time_usec) )
+    output = yield mapreduce_pipeline.MapreducePipeline(
+        "My MapReduce",
+        "main.my_map",
+        "main.my_reduce",
+        "mapreduce.input_readers.LogInputReader",
+        "mapreduce.output_writers.BlobstoreOutputWriter",
+        mapper_params={
+            "start_time": start_time_usec,
+            "end_time": end_time_usec,
+        },
+        reducer_params={
+            "mime_type": "text/plain",
+        },
+        shards=1)
+    yield StoreOutput("MyPiplineOutput", start_time_usec, end_time_usec, output)
+
+def my_map(log):
+  """My map function."""
+
+  logging.info('--------------------------------------- Got something ----------------------------------')
+  data = pprint.pformat(vars(log))
+  data = cgi.escape(data)
+  #logging.info('--------------------------------------- Got:\n%s' % data)
+  start_time_s = int(log.start_time() / 1e6)
+  yield(start_time_s, 1)
+
+def my_reduce(key, values):
+  """Word Count reduce function."""
+  logging.info('--------------------------------------- REDUCE: key=%s, values=%s ----------------------------------' % (key, values) )
+  yield "%s,%d\n" % (key, len(values))
+
+class StoreOutput(base_handler.PipelineBase):
+  """A pipeline to store the result of the MapReduce job in the datastore.
+  """
+
+  def run(self, mr_kind, start_time_usec, end_time_usec, blob_keys):
+    for blob_key in blob_keys: 
+      logging.info("********************************************** StoreOutput.run(self, mr_kind=%s, start_time_usec=%d, end_time_usec=%d, blob_keys=%s) url = http://localhost:8080%s" % (mr_kind, start_time_usec, end_time_usec, blob_key, blob_key) )
+      count = 0
+      for log in logservice.fetch(start_time_usec=start_time_usec,
+                                  end_time_usec=end_time_usec,
+                                  #min_log_level=None,
+                                  #include_app_logs=True,
+                                  ##include_incomplete=True,
+                                  #version_ids=None
+                                 ):
+        count += 1
+      logging.info('################# count = %s' % count)
+      url = "http://%s%s" % (app_identity.get_default_version_hostname(), blob_key)
+      db.put(Result(blob_key=blob_key, url=url))
+
+
+
+
+class DownloadHandler(blobstore_handlers.BlobstoreDownloadHandler):
+  """Handler to download blob by blobkey."""
+
+  def get(self, key):
+    key = str(urllib.unquote(key)).strip()
+    logging.debug("key is %s" % key)
+    blob_info = blobstore.BlobInfo.get(key)
+    self.send_blob(blob_info)
+
+
+
 
 class MainHandler(webapp.RequestHandler):
     def get(self):
@@ -70,6 +169,23 @@ class MainHandler(webapp.RequestHandler):
           precision_ms = 100
 
         raw_logs = self.request.get('raw_logs')
+
+        # start_time_usec
+        try:
+          s = self.request.get('start_time_str')
+          t = time.strptime(s, TIME_FORMAT)
+          start_time_usec = long(calendar.timegm(t)) * 1e6
+        except ValueError:
+          start_time_usec = 0
+
+        # end_time_usec
+        try:
+          s = self.request.get('end_time_str')
+          t = time.strptime(s, TIME_FORMAT)
+          end_time_usec = long(calendar.timegm(t)) * 1e6
+        except ValueError:
+          end_time_usec = time.time() * 1e6
+
 
         #logging.debug("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%DEBUG")
         #logging.info("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%INFO")
@@ -135,7 +251,16 @@ class MainHandler(webapp.RequestHandler):
           checked = ''
         self.response.out.write("""
               </select> or above<br>
-
+          """)
+ 
+        start_time_str = time.strftime(TIME_FORMAT, time.gmtime(start_time_usec / 1e6) )
+        end_time_str = time.strftime(TIME_FORMAT, time.gmtime(end_time_usec / 1e6) )
+        self.response.out.write("""
+             Only include requests between <input name='start_time_str' value='%s' size='20'>
+             and <input name='end_time_str' value='%s' size='20'><br>
+          """ % (start_time_str, end_time_str))
+ 
+        self.response.out.write("""
               Histogram precision: <input name='precision_ms' value='%s' size='5'>ms<br>
           """ % precision_ms)
  
@@ -167,11 +292,14 @@ class MainHandler(webapp.RequestHandler):
 
         messages={}
         count = 0
-        for log in logservice.fetch(end_time_usec=None,
+        logging.info("fetch(start_time_usec=%s, end_time_usec=%s, ...)" % (start_time_usec, end_time_usec) )
+        for log in logservice.fetch(start_time_usec=start_time_usec,
+                                    end_time_usec=end_time_usec,
                                     min_log_level=level,
                                     include_app_logs=True,
                                     #include_incomplete=True,
-                                    version_ids=[version]):
+                                    version_ids=[version]
+                                   ):
           #self.response.out.write('%s<br>' % log)
 
           # --------------- Raw logs ---------------
@@ -276,6 +404,8 @@ class MainHandler(webapp.RequestHandler):
 APP = webapp.WSGIApplication(
     [
         ('/', MainHandler),
+        ('/pipe', PipelineHandler),
+        (r'/blobstore/(.*)', DownloadHandler),
     ],
     debug=True)
 

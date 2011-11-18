@@ -43,8 +43,10 @@ import copy
 import StringIO
 import time
 import zipfile
+import logging
 
 from google.appengine.api import datastore
+from google.appengine.api import logservice
 from mapreduce.lib import files
 from mapreduce.lib.files import records
 from google.appengine.datastore import datastore_query
@@ -1638,3 +1640,126 @@ class RecordsReader(InputReader):
     if self._reader:
       position = self._reader.tell()
     return "%s:%s" % (self._filenames, position)
+
+
+class LogInputReader(InputReader):
+  """Reader to read a list of logs via the LogService API.
+
+  The number of input shards can be specified by the SHARDS_PARAM mapper
+  parameter. Logs cannot be split, so to generate shards, we require the user to
+  give us a starting and ending time (in microseconds since the Unix epoch). As
+  the difference between the starting and ending time may not evenly divide the
+  number of shards, they are not guaranteed to operate over an even number of
+  logs, merely a roughly even amount of time.
+
+  TODO: Let the user include the other filter parameters in their requests as
+  opposed to just starting time and ending time.
+  """
+
+  START_TIME_PARAM = "start_time"
+  END_TIME_PARAM = "end_time"
+
+  def __init__(self, start_time, end_time):
+    """Constructor.
+
+    Args:
+      start_time: The earliest time (inclusive), in microseconds since the Unix
+        epoch, that logs should be retrieved for.
+      end_time: The latest time (exclusive), in microseconds since the Unix
+        epoch, that logs should be retrieved for.
+    """
+    self._start_time = start_time
+    self._end_time = end_time
+
+  def __iter__(self):
+    """Iterates over logs in a given range of time.
+
+    Yields:
+      A RequestLog containing all the information for a single request.
+    """
+    for log in logservice.fetch(start_time_usec=long(self._start_time), end_time_usec=long(self._end_time)):
+      yield log
+
+  @classmethod
+  def from_json(cls, json):
+    """Creates an instance of the InputReader for the given input shard's state.
+
+    Args:
+      json: The InputReader state as a dict-like object.
+
+    Returns:
+      An instance of the InputReader configured using the given JSON parameters.
+    """
+    return cls(json["start_time"], json["end_time"])
+
+  def to_json(self):
+    """Returns an input shard state for the remaining inputs.
+
+    Returns:
+      A JSON serializable version of the remaining input to read.
+    """
+    return {"start_time": self._start_time,
+            "end_time": self._end_time}
+
+  @classmethod
+  def split_input(cls, mapper_spec):
+    """Returns a list of input readers for the given input specification.
+
+    Args:
+      mapper_spec: The MapperSpec for this InputReader.
+
+    Returns:
+      A list of InputReaders.
+    """
+    params = mapper_spec.params
+    shard_count = mapper_spec.shard_count
+
+    global_start_time = params[cls.START_TIME_PARAM]
+    global_end_time = params[cls.END_TIME_PARAM]
+    total_time = global_end_time - global_start_time
+    time_per_bucket = total_time / shard_count
+
+    start_times = []
+    for i in range(shard_count):
+      if i == 0:
+        start_times.append(global_start_time)
+      else:
+        start_times.append(start_times[i-1] + time_per_bucket)
+
+    end_times = []
+    for i in range(shard_count-1):
+      end_times.append(start_times[i+1])
+    end_times.append(global_end_time)
+
+    return [LogInputReader(start_times[i], end_times[i])
+            for i in range(shard_count)]
+
+  @classmethod
+  def validate(cls, mapper_spec):
+    """Validates the mapper's specification and all necessary parameters.
+
+    Args:
+      mapper_spec: The MapperSpec to be used with this InputReader.
+
+    Raises:
+      BadReaderParamsError: If the user fails to specify both a starting time
+        and an ending time, or if the starting time is later than the ending
+        time.
+    """
+    if mapper_spec.input_reader_class() != cls:
+      raise errors.BadReaderParamsError("Input reader class mismatch")
+
+    params = mapper_spec.params
+    if cls.START_TIME_PARAM not in params:
+      raise errors.BadReaderParamsError("Must specify a starting time for "
+                                        "mapper input")
+    if cls.END_TIME_PARAM not in params:
+      raise errors.BadReaderParamsError("Must specify a ending time for "
+                                        "mapper input")
+
+    if params[cls.START_TIME_PARAM] >= params[cls.END_TIME_PARAM]:
+      raise errors.BadReaderParamsError("The starting time cannot be later "
+                                        "than or the same as the ending time.")
+
+  def __str__(self):
+    return "%s:%s" % (self._start_time, self._end_time)
