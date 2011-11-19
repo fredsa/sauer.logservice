@@ -8,6 +8,9 @@ handlers:
   static_files: favicon.ico
   upload: favicon\.ico
 
+- url: /blobstore/.*
+  script: main.py
+
 - url: .*
   script: main.py
   login: admin

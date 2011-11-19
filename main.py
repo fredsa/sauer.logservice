@@ -109,6 +109,7 @@ class DownloadHandler(blobstore_handlers.BlobstoreDownloadHandler):
   """Handler to download blob by blobkey."""
 
   def get(self, key):
+    self.response.headers.add_header("Access-Control-Allow-Origin", "*")
     key = str(urllib.unquote(key)).strip()
     logging.debug("key is %s" % key)
     blob_info = blobstore.BlobInfo.get(key)
