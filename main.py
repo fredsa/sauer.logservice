@@ -1,19 +1,4 @@
 #!/usr/bin/env python
-#
-# Copyright 2007 Google Inc.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-#
 
 import logging
 import urllib
@@ -171,7 +156,7 @@ class MainHandler(webapp.RequestHandler):
 
 
         # --------------- HTML Page ---------------
-        self.response.out.write("""
+        self.response.out.write(r"""
           <html>
             <head>
               <title>Logservice %s %s</title>
@@ -198,6 +183,62 @@ class MainHandler(webapp.RequestHandler):
                   margin: 0em 0em .5em 0em;
                 }
               </style>
+              <script type="text/javascript" src="https://www.google.com/jsapi"></script>
+              <script type="text/javascript">
+                google.load('visualization', '1', {packages: ['corechart']});
+              </script>
+              <script type="text/javascript">
+                function showGraph(url) {
+                  document.getElementById("csv-data").innerHTML += "<hr>";
+                  var xmlhttp = new XMLHttpRequest();
+                  xmlhttp.open("GET", url, false);
+                  xmlhttp.send();
+                  
+                  var response = xmlhttp.responseText;
+                  document.getElementById("csv-data").innerHTML = response;
+          
+                  var data = new google.visualization.DataTable();
+                  data.addColumn('datetime', 'request start time');
+                  data.addColumn('number', 'qps');
+                  
+                  var lines = response.split('\n');
+                  for (i in lines) {
+                    line = lines[i];
+                    if (i==0) {line = "1321583104,20"}
+                    //if (i==1) {line = "1321583114,20"}
+                    //if (i==2) {line = "1321583214,0"}
+                    //document.getElementById("csv-data").innerHTML += line + " (line.length=" + line.length+ ")<br>";
+                    values = line.split(",");
+                    for (j in values) {
+                       values[j] = parseInt(values[j])
+                    }
+                    //document.getElementById("csv-data").innerHTML += values + " (values.length=" + values.length+ ")<br>";
+                    data.addRow([
+                      //values[0]-1321583114,
+                      new Date(values[0] *1e3),
+                      parseInt(values[1]),
+                    ]);
+                    //data.addRow(values);
+                    //document.getElementById("csv-data").innerHTML += "values=" + values[0] + " / " + values[1] + "<br>";
+                  }
+                  
+                  // Create and draw the visualization.
+                  
+                  new google.visualization.AreaChart(document.getElementById('visualization')).
+                  //new google.visualization.LineChart(document.getElementById('visualization')).
+                      draw(data, {legend: "none",
+                                  curveType: "none",
+                                  interpolateNulls: false,
+                                  hAxis: {title: 'Date Time',  titleTextStyle: {color: '#888'}},
+                                  width: 500, height: 400,
+                                 vAxis: {title: 'qps', titleTextStyle: {color: '#888'}},
+                                 }
+                          );
+                }
+            
+                google.setOnLoadCallback(function() {document.getElementById("csv-data").innerHTML += "GRAPHS READY"});
+              </script>
+
             </head>
             <body>
           """ % (app_identity.get_application_id(), version) )
@@ -272,15 +313,20 @@ class MainHandler(webapp.RequestHandler):
 
         # --------------- MapReduce results ---------------
         self.response.out.write("""<h1>MapReduce results</h1>""")
+        self.response.out.write("""
+          <div id="visualization" style="width: 500px; height: 400px;">visualization</div>
+          <hr>
+          <pre id="csv-data">csv-data</pre>
+          <hr>
+        """)
+        
         results = Result.all()
         for result in results:
           url = result.url
           t = pprint.pformat(db.to_dict(result))
-          t = t.replace(url, "<a href='%s'>%s</a>" % (url, url))
+          t = t.replace(url, """<a href='javascript:showGraph("%s")'>%s</a>""" % (url, url))
           self.response.out.write('<pre>%s</pre>' % url)
           self.response.out.write('<pre>%s</pre>' % t)
-
-        self.response.out.write('-----------------------------------------------<br>')
 
         now_s = time.time()
         start_time_usec = (now_s - 1 * 60 * 60) * 1e6
