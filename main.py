@@ -126,6 +126,27 @@ class MainHandler(webapp.RequestHandler):
 
 
     def do_mapreduce(self, start_time_usec, end_time_usec):
+        # --------------- MapReduce results ---------------
+        self.response.out.write("""<h1>MapReduce results</h1>""")
+        self.response.out.write("""
+          <div id="visualization" style="width: 500px; height: 400px; border: 1px solid gray;">visualization</div>
+          <hr>
+          <pre id="csv-data">csv-data</pre>
+          <hr>
+        """)
+        
+        results = Result.all()
+        for result in results:
+          url = result.url
+          t = pprint.pformat(db.to_dict(result))
+          t = t.replace(url, """<a href='javascript:showGraph("%s")'>%s</a>""" % (url, url))
+          self.response.out.write('<pre>%s</pre>' % url)
+          self.response.out.write('<pre>%s</pre>' % t)
+
+        now_s = time.time()
+        start_time_usec = (now_s - 1 * 60 * 60) * 1e6
+        end_time_usec = now_s * 1e6
+
         pipeline = MyPipeline(start_time_usec, end_time_usec)
         logging.info('************************************************************************************************************************************************')
         logging.info('*************************************************************** pipeline.start() ***************************************************************')
@@ -151,7 +172,6 @@ class MainHandler(webapp.RequestHandler):
         resource_dynamic={}
         resource_pending={}
 
-        self.response.out.write('%s, %s, %s, %s, %s, %s, %s' % (version, max_requests, level, start_time_usec, end_time_usec, precision_ms, raw_logs) )
         messages={}
         count = 0
         logging.info("fetch(start_time_usec=%s, end_time_usec=%s, ...)" % (start_time_usec, end_time_usec) )
@@ -451,28 +471,7 @@ class MainHandler(webapp.RequestHandler):
           </fieldset>
           """)
 
-
-        # --------------- MapReduce results ---------------
-        self.response.out.write("""<h1>MapReduce results</h1>""")
-        self.response.out.write("""
-          <div id="visualization" style="width: 500px; height: 400px; border: 1px solid gray;">visualization</div>
-          <hr>
-          <pre id="csv-data">csv-data</pre>
-          <hr>
-        """)
-        
-        results = Result.all()
-        for result in results:
-          url = result.url
-          t = pprint.pformat(db.to_dict(result))
-          t = t.replace(url, """<a href='javascript:showGraph("%s")'>%s</a>""" % (url, url))
-          self.response.out.write('<pre>%s</pre>' % url)
-          self.response.out.write('<pre>%s</pre>' % t)
-
-        now_s = time.time()
-        start_time_usec = (now_s - 1 * 60 * 60) * 1e6
-        end_time_usec = now_s * 1e6
-
+        # --------------- Conditional content ---------------
         if desired_action == "mapreduce":
           self.do_mapreduce(start_time_usec, end_time_usec)
         elif desired_action == "grep":
