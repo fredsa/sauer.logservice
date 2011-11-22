@@ -11,9 +11,20 @@ handlers:
 - url: /blobstore/.*
   script: main.py
 
+
+####################################################################################
+#includes:
+#- mapreduce/include.yaml
+
+- url: /mapreduce/pipeline/images
+  static_dir: mapreduce/lib/pipeline/ui/images
+
+- url: /mapreduce(/.*)?
+  script: mapreduce/main.py
+  login: admin
+####################################################################################
+
+
 - url: .*
   script: main.py
   login: admin
-
-includes:
-- mapreduce/include.yaml

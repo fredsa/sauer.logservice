@@ -1,19 +1,4 @@
 #!/usr/bin/env python
-#
-# Copyright 2007 Google Inc.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-#
 
 import logging
 import urllib
@@ -48,16 +33,19 @@ LEVEL = {
 MAX_LATENCY_WIDTH = 100
 TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
 
-class Result(db.Model):
+def human_time(time_usec):
+    return time.strftime(TIME_FORMAT, time.gmtime(time_usec / 1e6) )
+
+
+class LogServiceMapReduceResult(db.Expando):
   start_minute = db.IntegerProperty()
   requests = db.ListProperty(int)
   blob_key = db.StringProperty()
-  url = db.StringProperty()
 
 class MyPipeline(base_handler.PipelineBase):
 
-  def run(self, start_time_usec, end_time_usec):
-    logging.info('*********************************** MyPipeline.run(self, %d, %d)' % (start_time_usec, end_time_usec) )
+  def run(self, start_time_usec, end_time_usec, version):
+    logging.info('*********************************** MyPipeline.run(self, %d, %d, %s)' % (start_time_usec, end_time_usec, version) )
     output = yield mapreduce_pipeline.MapreducePipeline(
         "My MapReduce",
         "main.my_map",
@@ -67,12 +55,13 @@ class MyPipeline(base_handler.PipelineBase):
         mapper_params={
             "start_time": start_time_usec,
             "end_time": end_time_usec,
+            "version": version,
         },
         reducer_params={
             "mime_type": "text/plain",
         },
         shards=1)
-    yield StoreOutput("MyPiplineOutput", start_time_usec, end_time_usec, output)
+    yield StoreOutput(start_time_usec, end_time_usec, version, output)
 
 def my_map(log):
   """My map function."""
@@ -89,18 +78,16 @@ def my_reduce(key, values):
   logging.info('--------------------------------------- REDUCE: key=%s, values=%s ----------------------------------' % (key, values) )
   yield "%s,%d\n" % (key, len(values))
 
+
 class StoreOutput(base_handler.PipelineBase):
   """A pipeline to store the result of the MapReduce job in the datastore.
   """
 
-  def run(self, mr_kind, start_time_usec, end_time_usec, blob_keys):
-    hostname = app_identity.get_default_version_hostname()
-    if not hostname:
-      hostname = "localhost:8080"
+  def run(self, start_time_usec, end_time_usec, version, blob_keys):
     for blob_key in blob_keys: 
-      url = "http://%s%s" % (hostname, blob_key)
-      logging.info("********************************************** StoreOutput.run(self, mr_kind=%s, start_time_usec=%d, end_time_usec=%d, blob_keys=%s) url = %s" % (mr_kind, start_time_usec, end_time_usec, blob_key, url) )
-      db.put(Result(blob_key=blob_key, url=url))
+      logging.info("********************************************** StoreOutput.run(self, blob_key=%s, start_time_usec=%d, end_time_usec=%d, version=%s)" % (blob_key, start_time_usec, end_time_usec, version) )
+      result = LogServiceMapReduceResult(blob_key=blob_key, start_time_usec=start_time_usec, end_time_usec=end_time_usec, version=version)
+      db.put(result)
 
 
 
@@ -111,7 +98,7 @@ class DownloadHandler(blobstore_handlers.BlobstoreDownloadHandler):
   def get(self, key):
     self.response.headers.add_header("Access-Control-Allow-Origin", "*")
     key = str(urllib.unquote(key)).strip()
-    logging.debug("key is %s" % key)
+    logging.debug("Retuning blob with key %s" % key)
     blob_info = blobstore.BlobInfo.get(key)
     self.send_blob(blob_info)
 
@@ -119,185 +106,169 @@ class DownloadHandler(blobstore_handlers.BlobstoreDownloadHandler):
 
 
 class MainHandler(webapp.RequestHandler):
-    def get(self):
 
-        # version
-        version = self.request.get('version')
-        if not version:
-          version = os.environ['CURRENT_VERSION_ID'].split('.')[0]
+    def show_latency(self, precision_ms, latency, resource, name, comment):
 
-        # level
-        try:
-          level = int(self.request.get('level'))
-        except ValueError:
-          level = None
+        self.response.out.write("""<h1>Latency - %s</h1>""" % name)
+        self.response.out.write("""<div class='comment'>%s</div>""" % comment)
+        if len(latency) == 0:
+          self.response.out.write('No logs')
+          return
 
-        # max_requests
-        try: 
-          max_requests = int(self.request.get('max_requests'))
-        except ValueError:
-          max_requests = 10
+        scale = min(1, float(MAX_LATENCY_WIDTH) / max(latency.values()))
+        self.response.out.write("""<pre>""")
+        for k in range(0, max(latency) + 1 ):
+          cnt = latency.get(k, 0)
+          self.response.out.write('%6d requests: [%5d - %5d ms]: %s<br>' % (cnt, k * precision_ms, (k+1) * precision_ms -1, '*' * int(scale * cnt)) )
+        self.response.out.write('</pre>')
 
-        # precision_ms
-        try:
-          precision_ms = int(self.request.get('precision_ms'))
-        except ValueError:
-          precision_ms = 100
-
-        raw_logs = self.request.get('raw_logs')
-
-        # start_time_usec
-        try:
-          s = self.request.get('start_time_str')
-          t = time.strptime(s, TIME_FORMAT)
-          start_time_usec = long(calendar.timegm(t)) * 1e6
-        except ValueError:
-          start_time_usec = 0
-
-        # end_time_usec
-        try:
-          s = self.request.get('end_time_str')
-          t = time.strptime(s, TIME_FORMAT)
-          end_time_usec = long(calendar.timegm(t)) * 1e6
-        except ValueError:
-          end_time_usec = time.time() * 1e6
+        self.response.out.write("""<pre>""")
+        for res in sorted(resource, key=resource.get, reverse=True):
+          self.response.out.write("""%6d requests: %s<br>""" % (resource[res], res) )
+        self.response.out.write("""</pre>""")
 
 
-        #logging.debug("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%DEBUG")
-        #logging.info("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%INFO")
-        #logging.warning("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%WARNING")
-        #logging.error("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%ERROR")
-        #logging.critical("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%CRITICAL")
-
-
-        # --------------- HTML Page ---------------
-        self.response.out.write("""
-          <html>
-            <head>
-              <title>Logservice %s %s</title>
-              <style>
-                BODY {
-                  font-family: arial;
-                }
-                LEGEND {
-                  font-weight: bold;
-                }
-                pre.errmsg {
-                  background-color: #d9d9d9;
-                  padding: 0.4em 0.1em;
-                  margin: 0em;
-                }
-                H1 {
-                  font-size: 1.4em;
-                  margin: 1.9em 0em 0.2em 0em;
-                }
-                .comment {
-                  font-size: 0.7em;
-                  font-style: italic;
-                  color: #888;
-                  margin: 0em 0em .5em 0em;
-                }
-              </style>
-            </head>
-            <body>
-          """ % (app_identity.get_application_id(), version) )
-
-        # --------------- 1st FORM ---------------
-        self.response.out.write("""
-          <fieldset style='background-color: #def'>
-            <legend>Logs Filter</legend>
-            <form action='/'>
-              Application version: <input name='version' value='%s' size='20'><br>
-              Process logs for the <input name='max_requests' value='%d' size='5'> most recent requests<br>
-
-              Only include requests which contain at least one message at level
-              <select name='level'>
-        """ % (version, max_requests))
-
-        for k, v in LEVEL.iteritems():
-          if level == k:
-            selected = 'selected'
-          else:
-            selected = ''
-          self.response.out.write("""<option value='%s' %s>%s</option>""" % (k, selected, v) )
-
-        if raw_logs:
-          checked = 'checked'
-        else:
-          checked = ''
-        self.response.out.write("""
-              </select> or above<br>
-          """)
- 
-        start_time_str = time.strftime(TIME_FORMAT, time.gmtime(start_time_usec / 1e6) )
-        end_time_str = time.strftime(TIME_FORMAT, time.gmtime(end_time_usec / 1e6) )
-        self.response.out.write("""
-             Only include requests between <input name='start_time_str' value='%s' size='20'>
-             and <input name='end_time_str' value='%s' size='20'><br>
-          """ % (start_time_str, end_time_str))
- 
-        self.response.out.write("""
-              Histogram precision: <input name='precision_ms' value='%s' size='5'>ms<br>
-          """ % precision_ms)
- 
-        self.response.out.write("""
-              <input type='checkbox' name='raw_logs' %s> Pretty print raw logs<br>
-
-              <input type='submit' value='Summarize'>
-
-            </form>
-          </fieldset>
-          <br>""" % checked)
-
-        # --------------- 2nd FORM ---------------
-        self.response.out.write("""
-          <fieldset style='background-color: #def'>
-            <legend>Logs MapReduce</legend>
-            <form action='/'>
-        """)
-
-        self.response.out.write("""
-             Only include requests between <input name='start_time_str' value='%s' size='20'>
-             and <input name='end_time_str' value='%s' size='20'><br>
-          """ % (start_time_str, end_time_str))
- 
- 
-        self.response.out.write("""
-              <input type='submit' value='Kick Off MapReduce'>
-
-            </form>
-          </fieldset>
-          <br>""")
-
+    def do_visualize(self, blob_key, smooth_seconds):
 
         # --------------- MapReduce results ---------------
         self.response.out.write("""<h1>MapReduce results</h1>""")
-        results = Result.all()
-        for result in results:
-          url = result.url
-          t = pprint.pformat(db.to_dict(result))
-          t = t.replace(url, "<a href='%s'>%s</a>" % (url, url))
-          self.response.out.write('<pre>%s</pre>' % url)
-          self.response.out.write('<pre>%s</pre>' % t)
 
-        self.response.out.write('-----------------------------------------------<br>')
+        self.response.out.write("""
+          <div id='status' class='status'>Initializing visualization...</div>
+          <div id="visualization" style="width: 500px; height: 400px; border: 1px solid gray;">visualization</div>
+        """)
 
+        self.response.out.write(r"""
+              <script type="text/javascript" src="https://www.google.com/jsapi"></script>
+              <script type="text/javascript">
+                google.load('visualization', '1', {packages: ['corechart']});
+              </script>
+              <script type="text/javascript">
+
+                var smooth_seconds = %d;
+                var blob_key = "%s";
+                var blob_url = window.location.protocol + "//" + window.location.host + blob_key;
+
+                function setStatus(status) {
+                  document.getElementById("status").innerHTML = status;
+                  console.log(status);
+                }
+
+                function showGraph(url) {
+                  setStatus("Fetching content from " + url);
+
+                  var xhr = new XMLHttpRequest();
+                  xhr.onreadystatechange=function() {
+                    setStatus("xhr.readyState = " + xhr.readyState);
+                    if (xhr.readyState == 4) {
+                      setStatus("xhr.status = " + xhr.status);
+                      if (xhr.status==200) {
+                        showData(xhr.responseText);
+                      }
+                    }
+                  }
+
+                  setStatus("xhr.open('GET', '" + url + "', true)...");
+                  xhr.open("GET", url, true);
+
+                  setStatus("xhr.send()...");
+                  xhr.send();
+                }
+
+                function showData(response) {
+                  var data = new google.visualization.DataTable();
+                  data.addColumn('datetime', 'request start time');
+                  data.addColumn('number', 'qps');
+                  
+                  var lines = response.split('\n');
+                  setStatus("Parsing " + (lines.length) + " lines of CSV data...");
+                  
+                  // testing
+                  s = lines[0].split(",", 2); lines[0] = s[0] - 600 + "," + s[1]
+
+                  map = []
+                  for (i in lines) {
+                    line = lines[i];
+                    if (!line) continue;
+                    s = line.split(",", 2);
+                    setStatus("Scanning row " + i + " with data " + line + "   s[1] = " + s[1]);
+                    map[String(s[0])] = s[1];
+
+                    ts = parseInt(s[0])
+                    if (i == 0) {
+                      min = ts;
+                      max = ts;
+                    } else {
+                      min = Math.min(min, ts);
+                      max = Math.max(max, ts);
+                    }
+                  }
+
+                  for (ts = min; ts <= max; ts += smooth_seconds) {
+                    totals=[0]
+                    for (ts2 = ts; ts2 < ts + smooth_seconds; ts2++) {
+                      values = map[String(ts2)]
+                      setStatus("Parsing values timestamp " + ts2 + " for datapoint at " + ts + " : " + values);
+                      if (!values) continue;
+                      values = values.split(",");
+                      for (j in values) {
+                         totals[j] += parseInt(values[j])
+                      }
+                    }
+
+                    data.addRow([
+                      new Date(ts * 1e3),
+                      parseInt(totals[0] / smooth_seconds),
+                    ]);
+                  }
+                  
+                  setStatus("Visualizing results...");
+                  new google.visualization.AreaChart(document.getElementById('visualization')).
+                      draw(data, {legend: "none",
+                                  interpolateNulls: false,
+                                  hAxis: {title: 'Date Time',  titleTextStyle: {color: '#888'}},
+                                  width: 500, height: 400,
+                                  vAxis: {title: 'qps', titleTextStyle: {color: '#888'}},
+                                 }
+                          );
+                  setStatus("Showing results smoothed over " + smooth_seconds + " seconds for <a href='" + blob_url + "'>" + blob_url + "</a>");
+                }
+            
+                google.setOnLoadCallback(function() { showGraph(blob_url); });
+
+                setStatus("script block executed");
+              </script>
+        """ % (smooth_seconds, blob_key) )
+
+
+    def do_mapreduce(self, start_time_usec, end_time_usec, version):
+        
+        self.response.out.write("""<h1>MapReduce launched</h1>""")
+        self.response.out.write("""
+            <div class='status'>
+            start_time_usec = %s (%d)<br>
+            end_time_usec = %s (%d)<br>
+            version = %s<br>
+            </div>
+          """ % (human_time(start_time_usec), start_time_usec, human_time(end_time_usec), end_time_usec, version) )
+        self.response.out.write("""<a href='/?version=%s'>&lt;&lt;%s</a>""" % (version, version) )
         now_s = time.time()
         start_time_usec = (now_s - 1 * 60 * 60) * 1e6
         end_time_usec = now_s * 1e6
 
-        pipeline = MyPipeline(start_time_usec, end_time_usec)
+        pipeline = MyPipeline(start_time_usec, end_time_usec, version)
         logging.info('************************************************************************************************************************************************')
         logging.info('*************************************************************** pipeline.start() ***************************************************************')
         logging.info('************************************************************************************************************************************************')
         pipeline.start()
 
 
+    def do_grep(self, version, max_requests, level, start_time_usec, end_time_usec, precision_ms, raw_logs):
 
         # --------------- Raw logs ---------------
         if raw_logs:
           self.response.out.write("""<h1>Raw logs</h1>""")
-
+ 
         latency_errors={}
         latency_cached={}
         latency_static={}
@@ -374,33 +345,12 @@ class MainHandler(webapp.RequestHandler):
             """)
           return
 
-
         # --------------- Latency ---------------
-        def show_latency(latency, resource, name, comment):
-          self.response.out.write("""<h1>Latency - %s</h1>""" % name)
-          self.response.out.write("""<div class='comment'>%s</div>""" % comment)
-          if len(latency) == 0:
-            self.response.out.write('No logs')
-            return
-
-          scale = min(1, float(MAX_LATENCY_WIDTH) / max(latency.values()))
-          self.response.out.write("""<pre>""")
-          for k in range(0, max(latency) + 1 ):
-            cnt = latency.get(k, 0)
-            self.response.out.write('%6d requests: [%5d - %5d ms]: %s<br>' % (cnt, k * precision_ms, (k+1) * precision_ms -1, '*' * int(scale * cnt)) )
-          self.response.out.write('</pre>')
-
-          self.response.out.write("""<pre>""")
-          for res in sorted(resource, key=resource.get, reverse=True):
-            self.response.out.write("""%6d requests: %s<br>""" % (resource[res], res) )
-          self.response.out.write("""</pre>""")
-
-
-        show_latency(latency_dynamic, resource_dynamic, 'Dynamic Requests', 'log.response_size() > 0 and log.status() != 204 and log.status() <= 399')
-        show_latency(latency_errors,  resource_errors,  'Errors',           'log.status() >= 400')
-        show_latency(latency_static,  resource_static,  'Static Requests',  'log.response_size() == 0 and log.status() <= 399')
-        show_latency(latency_cached,  resource_cached,  'Cached Requests',  'log.status() == 204')
-        show_latency(latency_pending, resource_pending, 'Pending Time',     'log.pending_time() > 0')
+        self.show_latency(precision_ms, latency_dynamic, resource_dynamic, 'Dynamic Requests', 'log.response_size() > 0 and log.status() != 204 and log.status() <= 399')
+        self.show_latency(precision_ms, latency_errors,  resource_errors,  'Errors',           'log.status() >= 400')
+        self.show_latency(precision_ms, latency_static,  resource_static,  'Static Requests',  'log.response_size() == 0 and log.status() <= 399')
+        self.show_latency(precision_ms, latency_cached,  resource_cached,  'Cached Requests',  'log.status() == 204')
+        self.show_latency(precision_ms, latency_pending, resource_pending, 'Pending Time',     'log.pending_time() > 0')
 
         # --------------- Errors ---------------
         self.response.out.write("""<h1>Log message frequency</h1>""")
@@ -415,11 +365,260 @@ class MainHandler(webapp.RequestHandler):
               <pre class='errmsg'>%s</pre><br>
               """ % (messages[msg], cgi.escape(msg)) )
 
+
+    def get(self):
+        # version
+        version = self.request.get('version')
+        if not version:
+          version = os.environ['CURRENT_VERSION_ID'].split('.')[0]
+
+        # level
+        try:
+          level = int(self.request.get('level'))
+        except ValueError:
+          level = None
+
+        # max_requests
+        try: 
+          max_requests = int(self.request.get('max_requests'))
+        except ValueError:
+          max_requests = 10
+
+        # precision_ms
+        try:
+          precision_ms = int(self.request.get('precision_ms'))
+        except ValueError:
+          precision_ms = 100
+
+        # raw_logs
+        raw_logs = self.request.get('raw_logs')
+
+        # start_time_usec
+        try:
+          s = self.request.get('start_time_str')
+          t = time.strptime(s, TIME_FORMAT)
+          start_time_usec = long(calendar.timegm(t)) * 1e6
+        except ValueError:
+          # default to '10 minutes ago'
+          start_time_usec = (time.time() - 600) * 1e6
+
+        # end_time_usec
+        try:
+          s = self.request.get('end_time_str')
+          t = time.strptime(s, TIME_FORMAT)
+          end_time_usec = long(calendar.timegm(t)) * 1e6
+        except ValueError:
+          # default to 'now'
+          end_time_usec = time.time() * 1e6
+
+        # desired_action
+        desired_action=self.request.get("desired_action")
+
+        # blob_key
+        blob_key = self.request.get('blob_key')
+
+        # smooth_seconds
+        try:
+          smooth_seconds = long(self.request.get('smooth_seconds'))
+        except ValueError:
+          smooth_seconds = 60
+
+
+        #logging.debug("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%DEBUG")
+        #logging.info("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%INFO")
+        #logging.warning("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%WARNING")
+        #logging.error("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%ERROR")
+        #logging.critical("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%CRITICAL")
+
+
+        # --------------- HTML Page ---------------
+        self.response.out.write("""
+          <html>
+            <head>
+              <title>Logservice %s</title>
+              <style>
+                BODY {
+                  font-family: arial;
+                }
+                LEGEND {
+                  font-weight: bold;
+                }
+                pre.errmsg {
+                  background-color: #d9d9d9;
+                  padding: 0.4em 0.1em;
+                  margin: 0em;
+                }
+                H1 {
+                  font-size: 1.4em;
+                  margin: 1.9em 0em 0.2em 0em;
+                }
+                .comment {
+                  font-size: 0.7em;
+                  font-style: italic;
+                  color: #888;
+                  margin: 0em 0em .5em 0em;
+                }
+                FIELDSET {
+                  background-color: #def;
+                 margin: 0.5em 0em;
+                }
+                .status {
+                  white-space: pre;
+                  font-family: monospace;
+                  margin: 0.4em 0em;
+                }
+                .selected {
+                  font-weight: bold;
+                }
+                pre.small {
+                  font-size: 0.8em;
+                }
+              </style>
+            </head>
+            <body>
+          """ % app_identity.get_application_id() )
+
+        # --------------- TITLE ---------------
+        self.response.out.write("""
+            <div style='float: right;'>git: <a href='http://code.google.com/p/sauer/source/browse/?repo=logservice' target='_blank'>http://code.google.com/p/sauer.logservice/</a></div>
+            <div>
+              <a href="/?version=%s">&lt;&lt; %s</a>&nbsp;&nbsp;
+              <a href='/mapreduce' target='_blank'>/mapreduce</a>
+            </div>
+          """ % (version, version) )
+        # --------------- 1st FORM ---------------
+        self.response.out.write("""
+          <fieldset>
+            <legend>Logs Filter</legend>
+            <form action='/'>
+              Application version: <input name='version' value='%s' size='20'><br>
+              Process logs for the <input name='max_requests' value='%d' size='5'> most recent requests<br>
+
+              Only include requests which contain at least one message at level
+              <select name='level'>
+        """ % (version, max_requests))
+
+        for k, v in LEVEL.iteritems():
+          if level == k:
+            selected = 'selected'
+          else:
+            selected = ''
+          self.response.out.write("""<option value='%s' %s>%s</option>""" % (k, selected, v) )
+
+        if raw_logs:
+          checked = 'checked'
+        else:
+          checked = ''
+        self.response.out.write("""
+              </select> or above<br>
+          """)
+ 
+        start_time_str = human_time(start_time_usec)
+        end_time_str = human_time(end_time_usec)
+        self.response.out.write("""
+             Only include requests between <input name='start_time_str' value='%s' size='20'>
+             and <input name='end_time_str' value='%s' size='20'><br>
+          """ % (start_time_str, end_time_str))
+ 
+        self.response.out.write("""
+              Histogram precision: <input name='precision_ms' value='%s' size='5'>ms<br>
+          """ % precision_ms)
+
+        self.response.out.write("""
+              <input type='checkbox' name='raw_logs' %s> Pretty print raw logs<br>
+
+              <input type='hidden' name='desired_action' value='grep'>
+              <input type='submit' value='Summarize'>
+
+            </form>
+          </fieldset>
+          """ % checked)
+
+        # --------------- 2nd FORM ---------------
+        self.response.out.write("""
+          <fieldset>
+            <legend>Logs MapReduce</legend>
+            <form action='/'>
+              Application version: <input name='version' value='%s' size='20'><br>
+        """ % version)
+
+        self.response.out.write("""
+             Only include requests between <input name='start_time_str' value='%s' size='20'>
+             and <input name='end_time_str' value='%s' size='20'><br>
+          """ % (start_time_str, end_time_str))
+ 
+        self.response.out.write("""
+              <input type='hidden' name='desired_action' value='mapreduce'>
+              <input type='submit' value='Kick Off MapReduce'>
+          """)
+
+        self.response.out.write("""
+            </form>
+          </fieldset>
+          """)
+
+        results = db.Query(LogServiceMapReduceResult).order('-end_time_usec').fetch(limit=10)
+        if results:
+          self.response.out.write("""
+            <fieldset>
+              <legend>Visualize MapReduce results</legend>
+              <form action='/' name='visualize_map_reduce_form'>
+
+                Smooth results over <input name='smooth_seconds' value='%s' size='10'> seconds<br>
+            """ % smooth_seconds)
+
+          self.response.out.write("""
+                <input type='hidden' name='blob_key'>
+                <input type='hidden' name='version'>
+                <script>
+                  function visualize_map_reduce(version, blob_key) {
+                    f = document.forms["visualize_map_reduce_form"];
+                    f.blob_key.value = blob_key;
+                    f.version.value = version;
+                    f.submit();
+                  }
+                </script>
+            """)
+
+          for result in results:
+            key = result.blob_key
+            v = result.version
+            if key == blob_key:
+              css_class = "selected"
+            else:
+              css_class = ""
+            self.response.out.write("""
+              <div class='%s'>
+                <input type=button onClick='visualize_map_reduce("%s", "%s")' value='visualize'>
+                 start_time_usec=%s, end_time_usec=%s, version=%s
+              </div>""" % (css_class,
+                           v, key,
+                           human_time(start_time_usec), human_time(end_time_usec), v) )
+            if key == blob_key:
+              t = pprint.pformat(db.to_dict(result))
+              self.response.out.write("""<pre class='small'>%s</pre>""" % t)
+
+          self.response.out.write("""
+                <input type='hidden' name='desired_action' value='visualize'>
+              </form>
+            </fieldset>
+            """)
+
+        # --------------- Conditional content ---------------
+        if desired_action == "mapreduce":
+          self.do_mapreduce(start_time_usec, end_time_usec, version)
+        elif desired_action == "grep":
+          self.do_grep(version, max_requests, level, start_time_usec, end_time_usec, precision_ms, raw_logs)
+        elif desired_action == "visualize":
+          self.do_visualize(blob_key, smooth_seconds)
+
         # --------------- End of page ---------------
         self.response.out.write("""
             </body>
           </html>
           """)
+
+
 
 APP = webapp.WSGIApplication(
     [
