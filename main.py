@@ -125,7 +125,7 @@ class MainHandler(webapp.RequestHandler):
         self.response.out.write("""</pre>""")
 
 
-    def do_visualize(self, blob_url):
+    def do_visualize(self, blob_url, smooth_seconds):
 
         # --------------- MapReduce results ---------------
         self.response.out.write("""<h1>MapReduce results</h1>""")
@@ -141,6 +141,10 @@ class MainHandler(webapp.RequestHandler):
                 google.load('visualization', '1', {packages: ['corechart']});
               </script>
               <script type="text/javascript">
+
+                var smooth_seconds = %d;
+                var blob_url = "%s";
+
                 function setStatus(status) {
                   document.getElementById("status").innerHTML = status;
                 }
@@ -148,14 +152,25 @@ class MainHandler(webapp.RequestHandler):
                 function showGraph(url) {
                   setStatus("Fetching content from " + url);
 
-                  var xmlhttp = new XMLHttpRequest();
-                  xmlhttp.open("GET", url, false);
-                  xmlhttp.send();
+                  var xhr = new XMLHttpRequest();
+                  xhr.onreadystatechange=function() {
+                    setStatus("xhr.readyState = " + xhr.readyState);
+                    if (xhr.readyState == 4) {
+                      setStatus("xhr.status = " + xhr.status);
+                      if (xhr.status==200) {
+                        showData(xhr.responseText);
+                      }
+                    }
+                  }
 
-                  setStatus("XHR completed");
+                  setStatus("xhr.open()...");
+                  xhr.open("GET", url, true);
 
-                  var response = xmlhttp.responseText;
-          
+                  setStatus("xhr.send()...");
+                  xhr.send();
+                }
+
+                function showData(response) {
                   var data = new google.visualization.DataTable();
                   data.addColumn('datetime', 'request start time');
                   data.addColumn('number', 'qps');
@@ -163,8 +178,8 @@ class MainHandler(webapp.RequestHandler):
                   var lines = response.split('\n');
                   setStatus("Parsing " + (lines.length) + " lines of CSV data...");
                   
-                  s = lines[0].split(",", 2);
-                  lines[0] = s[0] - 600 + "," + s[1]
+                  // testing
+                  s = lines[0].split(",", 2); lines[0] = s[0] - 600 + "," + s[1]
 
                   map = []
                   for (i in lines) {
@@ -184,22 +199,21 @@ class MainHandler(webapp.RequestHandler):
                     }
                   }
 
-                  for (ts = min; ts <= max; ts++) {
-                    values = map[String(ts)]
-
-                    // fill in missing values so x-axis has all datapoints
-                    if (!values) {
-                      values = "0"
+                  for (ts = min; ts <= max; ts += smooth_seconds) {
+                    totals=[0]
+                    for (ts2 = ts; ts2 < ts + smooth_seconds; ts2++) {
+                      values = map[String(ts2)]
+                      setStatus("Parsing values timestamp " + ts2 + " for datapoint at " + ts + " : " + values);
+                      if (!values) continue;
+                      values = values.split(",");
+                      for (j in values) {
+                         totals[j] += parseInt(values[j])
+                      }
                     }
 
-                    setStatus("Parsing values " + values + " at timestamp " + ts);
-                    values = values.split(",");
-                    for (j in values) {
-                       values[j] = parseInt(values[j])
-                    }
                     data.addRow([
-                      new Date(ts *1e3),
-                      parseInt(values[0]),
+                      new Date(ts * 1e3),
+                      parseInt(totals[0] / smooth_seconds),
                     ]);
                   }
                   
@@ -213,14 +227,14 @@ class MainHandler(webapp.RequestHandler):
                                   vAxis: {title: 'qps', titleTextStyle: {color: '#888'}},
                                  }
                           );
-                  setStatus("");
+                  setStatus("Showing results smoothed over " + smooth_seconds + " seconds for <a href='" + blob_url + "'>" + blob_url + "</a>");
                 }
             
-                google.setOnLoadCallback(function() { showGraph("%s"); });
+                google.setOnLoadCallback(function() { showGraph(blob_url); });
 
                 setStatus("script block executed");
               </script>
-        """ % blob_url)
+        """ % (smooth_seconds, blob_url) )
 
 
     def do_mapreduce(self, start_time_usec, end_time_usec):
@@ -388,6 +402,12 @@ class MainHandler(webapp.RequestHandler):
         # blob_url
         blob_url = self.request.get('blob_url')
 
+        # smooth_seconds
+        try:
+          smooth_seconds = long(self.request.get('smooth_seconds'))
+        except ValueError:
+          smooth_seconds = 60
+
 
         #logging.debug("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%DEBUG")
         #logging.info("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%INFO")
@@ -429,7 +449,6 @@ class MainHandler(webapp.RequestHandler):
                 }
                 .status {
                   white-space: pre;
-                  color: blue;
                 }
               </style>
             </head>
@@ -517,6 +536,10 @@ class MainHandler(webapp.RequestHandler):
               <legend>Visualize MapReduce results</legend>
               <form action='/'>
 
+                Smooth results over <input name='smooth_seconds' value='%s' size='10' onChange='this.parentNode.submit()'> seconds<br>
+            """ % smooth_seconds)
+
+          self.response.out.write("""
                 <select name='blob_url' onChange='this.parentNode.submit()'>
                 <option value=''>(select blob to view)</option>
             """)
@@ -544,7 +567,7 @@ class MainHandler(webapp.RequestHandler):
         elif desired_action == "grep":
           self.do_grep(version, max_requests, level, start_time_usec, end_time_usec, precision_ms, raw_logs)
         elif desired_action == "visualize":
-          self.do_visualize(blob_url)
+          self.do_visualize(blob_url, smooth_seconds)
 
         # --------------- End of page ---------------
         self.response.out.write("""
