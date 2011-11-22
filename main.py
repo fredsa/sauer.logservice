@@ -33,7 +33,7 @@ LEVEL = {
 MAX_LATENCY_WIDTH = 100
 TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
 
-class Result(db.Model):
+class LogServiceMapReduceResult(db.Model):
   start_minute = db.IntegerProperty()
   requests = db.ListProperty(int)
   blob_key = db.StringProperty()
@@ -85,7 +85,7 @@ class StoreOutput(base_handler.PipelineBase):
     for blob_key in blob_keys: 
       url = "http://%s%s" % (hostname, blob_key)
       logging.info("********************************************** StoreOutput.run(self, mr_kind=%s, start_time_usec=%d, end_time_usec=%d, blob_keys=%s) url = %s" % (mr_kind, start_time_usec, end_time_usec, blob_key, url) )
-      db.put(Result(blob_key=blob_key, url=url))
+      db.put(LogServiceMapReduceResult(blob_key=blob_key, url=url))
 
 
 
@@ -386,7 +386,8 @@ class MainHandler(webapp.RequestHandler):
           t = time.strptime(s, TIME_FORMAT)
           start_time_usec = long(calendar.timegm(t)) * 1e6
         except ValueError:
-          start_time_usec = 0
+          # default to '10 minutes ago'
+          start_time_usec = (time.time() - 3600) * 1e6
 
         # end_time_usec
         try:
@@ -394,6 +395,7 @@ class MainHandler(webapp.RequestHandler):
           t = time.strptime(s, TIME_FORMAT)
           end_time_usec = long(calendar.timegm(t)) * 1e6
         except ValueError:
+          # default to 'now'
           end_time_usec = time.time() * 1e6
 
         # desired_action
@@ -529,7 +531,7 @@ class MainHandler(webapp.RequestHandler):
           </fieldset>
           """)
 
-        results = db.Query(Result).fetch(limit=10)
+        results = db.Query(LogServiceMapReduceResult).fetch(limit=10)
         if results:
           self.response.out.write("""
             <fieldset>
