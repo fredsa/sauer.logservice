@@ -33,11 +33,14 @@ LEVEL = {
 MAX_LATENCY_WIDTH = 100
 TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
 
+def human_time(time_usec):
+    return time.strftime(TIME_FORMAT, time.gmtime(time_usec / 1e6) )
+
+
 class LogServiceMapReduceResult(db.Model):
   start_minute = db.IntegerProperty()
   requests = db.ListProperty(int)
   blob_key = db.StringProperty()
-  url = db.StringProperty()
 
 class MyPipeline(base_handler.PipelineBase):
 
@@ -79,13 +82,10 @@ class StoreOutput(base_handler.PipelineBase):
   """
 
   def run(self, mr_kind, start_time_usec, end_time_usec, blob_keys):
-    hostname = app_identity.get_default_version_hostname()
-    if not hostname:
-      hostname = "localhost:8080"
     for blob_key in blob_keys: 
-      url = "http://%s%s" % (hostname, blob_key)
-      logging.info("********************************************** StoreOutput.run(self, mr_kind=%s, start_time_usec=%d, end_time_usec=%d, blob_keys=%s) url = %s" % (mr_kind, start_time_usec, end_time_usec, blob_key, url) )
-      db.put(LogServiceMapReduceResult(blob_key=blob_key, url=url))
+      logging.info("********************************************** StoreOutput.run(self, mr_kind=%s, start_time_usec=%d, end_time_usec=%d, blob_keys=%s)" % (mr_kind, start_time_usec, end_time_usec, blob_key) )
+      result = LogServiceMapReduceResult(blob_key=blob_key)
+      db.put(result)
 
 
 
@@ -96,7 +96,7 @@ class DownloadHandler(blobstore_handlers.BlobstoreDownloadHandler):
   def get(self, key):
     self.response.headers.add_header("Access-Control-Allow-Origin", "*")
     key = str(urllib.unquote(key)).strip()
-    logging.debug("key is %s" % key)
+    logging.debug("Retuning blob with key %s" % key)
     blob_info = blobstore.BlobInfo.get(key)
     self.send_blob(blob_info)
 
@@ -106,6 +106,7 @@ class DownloadHandler(blobstore_handlers.BlobstoreDownloadHandler):
 class MainHandler(webapp.RequestHandler):
 
     def show_latency(self, precision_ms, latency, resource, name, comment):
+
         self.response.out.write("""<h1>Latency - %s</h1>""" % name)
         self.response.out.write("""<div class='comment'>%s</div>""" % comment)
         if len(latency) == 0:
@@ -125,7 +126,7 @@ class MainHandler(webapp.RequestHandler):
         self.response.out.write("""</pre>""")
 
 
-    def do_visualize(self, blob_url, smooth_seconds):
+    def do_visualize(self, blob_key, smooth_seconds):
 
         # --------------- MapReduce results ---------------
         self.response.out.write("""<h1>MapReduce results</h1>""")
@@ -143,10 +144,12 @@ class MainHandler(webapp.RequestHandler):
               <script type="text/javascript">
 
                 var smooth_seconds = %d;
-                var blob_url = "%s";
+                var blob_key = "%s";
+                var blob_url = window.location.protocol + "//" + window.location.host + blob_key;
 
                 function setStatus(status) {
                   document.getElementById("status").innerHTML = status;
+                  console.log(status);
                 }
 
                 function showGraph(url) {
@@ -163,7 +166,7 @@ class MainHandler(webapp.RequestHandler):
                     }
                   }
 
-                  setStatus("xhr.open()...");
+                  setStatus("xhr.open('GET', '" + url + "', true)...");
                   xhr.open("GET", url, true);
 
                   setStatus("xhr.send()...");
@@ -234,11 +237,14 @@ class MainHandler(webapp.RequestHandler):
 
                 setStatus("script block executed");
               </script>
-        """ % (smooth_seconds, blob_url) )
+        """ % (smooth_seconds, blob_key) )
 
 
     def do_mapreduce(self, start_time_usec, end_time_usec):
         
+        self.response.out.write("""<h1>MapReduce launched</h1>""")
+        self.response.out.write("""<div class='status'>start_time_usec = %s (%d)<br>end_time_usec = %s (%d)</div>""" % (human_time(start_time_usec), start_time_usec, human_time(end_time_usec), end_time_usec) )
+        self.response.out.write("""<a href='/'>Refresh page</a>""")
         now_s = time.time()
         start_time_usec = (now_s - 1 * 60 * 60) * 1e6
         end_time_usec = now_s * 1e6
@@ -401,8 +407,8 @@ class MainHandler(webapp.RequestHandler):
         # desired_action
         desired_action=self.request.get("desired_action")
 
-        # blob_url
-        blob_url = self.request.get('blob_url')
+        # blob_key
+        blob_key = self.request.get('blob_key')
 
         # smooth_seconds
         try:
@@ -451,6 +457,8 @@ class MainHandler(webapp.RequestHandler):
                 }
                 .status {
                   white-space: pre;
+                  font-family: monospace;
+                  margin: 0.4em 0em;
                 }
               </style>
             </head>
@@ -488,8 +496,8 @@ class MainHandler(webapp.RequestHandler):
               </select> or above<br>
           """)
  
-        start_time_str = time.strftime(TIME_FORMAT, time.gmtime(start_time_usec / 1e6) )
-        end_time_str = time.strftime(TIME_FORMAT, time.gmtime(end_time_usec / 1e6) )
+        start_time_str = human_time(start_time_usec)
+        end_time_str = human_time(end_time_usec)
         self.response.out.write("""
              Only include requests between <input name='start_time_str' value='%s' size='20'>
              and <input name='end_time_str' value='%s' size='20'><br>
@@ -542,18 +550,18 @@ class MainHandler(webapp.RequestHandler):
             """ % smooth_seconds)
 
           self.response.out.write("""
-                <select name='blob_url' onChange='this.parentNode.submit()'>
+                <select name='blob_key' onChange='this.parentNode.submit()'>
                 <option value=''>(select blob to view)</option>
             """)
 
           for result in results:
-            url = result.url
+            key = result.blob_key
             t = pprint.pformat(db.to_dict(result))
-            if url == blob_url:
+            if key == blob_key:
               selected = "selected"
             else:
               selected = ""
-            self.response.out.write("""<option value='%s' %s>%s</option>""" % (url, selected, t) )
+            self.response.out.write("""<option value='%s' %s>%s</option>""" % (key, selected, t) )
 
           self.response.out.write("""
                 </select><br>
@@ -569,7 +577,7 @@ class MainHandler(webapp.RequestHandler):
         elif desired_action == "grep":
           self.do_grep(version, max_requests, level, start_time_usec, end_time_usec, precision_ms, raw_logs)
         elif desired_action == "visualize":
-          self.do_visualize(blob_url, smooth_seconds)
+          self.do_visualize(blob_key, smooth_seconds)
 
         # --------------- End of page ---------------
         self.response.out.write("""
