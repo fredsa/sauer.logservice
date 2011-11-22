@@ -223,7 +223,6 @@ class MainHandler(webapp.RequestHandler):
                   setStatus("Visualizing results...");
                   new google.visualization.AreaChart(document.getElementById('visualization')).
                       draw(data, {legend: "none",
-                                  curveType: "none",
                                   interpolateNulls: false,
                                   hAxis: {title: 'Date Time',  titleTextStyle: {color: '#888'}},
                                   width: 500, height: 400,
@@ -544,27 +543,32 @@ class MainHandler(webapp.RequestHandler):
           self.response.out.write("""
             <fieldset>
               <legend>Visualize MapReduce results</legend>
-              <form action='/'>
+              <form action='/' name='visualize_map_reduce_form'>
 
-                Smooth results over <input name='smooth_seconds' value='%s' size='10' onChange='this.parentNode.submit()'> seconds<br>
+                Smooth results over <input name='smooth_seconds' value='%s' size='10'> seconds<br>
             """ % smooth_seconds)
 
           self.response.out.write("""
-                <select name='blob_key' onChange='this.parentNode.submit()'>
-                <option value=''>(select blob to view)</option>
+                <input type='hidden' name='blob_key'>
+                <script>
+                  function visualize_map_reduce(blob_key) {
+                    f = document.forms["visualize_map_reduce_form"];
+                    f.blob_key.value = blob_key;
+                    f.submit();
+                  }
+                </script>
             """)
 
           for result in results:
             key = result.blob_key
             t = pprint.pformat(db.to_dict(result))
             if key == blob_key:
-              selected = "selected"
+              css_class = "selected"
             else:
-              selected = ""
-            self.response.out.write("""<option value='%s' %s>%s</option>""" % (key, selected, t) )
+              css_class = ""
+            self.response.out.write("""<input type=button onClick='visualize_map_reduce("%s")' class='%s' value='visualize'> %s<br>""" % (key, css_class, t) )
 
           self.response.out.write("""
-                </select><br>
 
                 <input type='hidden' name='desired_action' value='visualize'>
               </form>
