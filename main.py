@@ -129,6 +129,12 @@ class MainHandler(webapp.RequestHandler):
 
         # --------------- MapReduce results ---------------
         self.response.out.write("""<h1>MapReduce results</h1>""")
+
+        self.response.out.write("""
+          <div id='status' class='status'>Initializing visualization...</div>
+          <div id="visualization" style="width: 500px; height: 400px; border: 1px solid gray;">visualization</div>
+        """)
+
         self.response.out.write(r"""
               <script type="text/javascript" src="https://www.google.com/jsapi"></script>
               <script type="text/javascript">
@@ -154,18 +160,46 @@ class MainHandler(webapp.RequestHandler):
                   data.addColumn('datetime', 'request start time');
                   data.addColumn('number', 'qps');
                   
-                  setStatus("Parsing CSV data...");
                   var lines = response.split('\n');
+                  setStatus("Parsing " + (lines.length) + " lines of CSV data...");
+                  
+                  s = lines[0].split(",", 2);
+                  lines[0] = s[0] - 600 + "," + s[1]
+
+                  map = []
                   for (i in lines) {
                     line = lines[i];
-                    setStatus("Parsing row " + i + " with data " + line);
-                    values = line.split(",");
+                    if (!line) continue;
+                    s = line.split(",", 2);
+                    setStatus("Scanning row " + i + " with data " + line + "   s[1] = " + s[1]);
+                    map[String(s[0])] = s[1];
+
+                    ts = parseInt(s[0])
+                    if (i == 0) {
+                      min = ts;
+                      max = ts;
+                    } else {
+                      min = Math.min(min, ts);
+                      max = Math.max(max, ts);
+                    }
+                  }
+
+                  for (ts = min; ts <= max; ts++) {
+                    values = map[String(ts)]
+
+                    // fill in missing values so x-axis has all datapoints
+                    if (!values) {
+                      values = "0"
+                    }
+
+                    setStatus("Parsing values " + values + " at timestamp " + ts);
+                    values = values.split(",");
                     for (j in values) {
                        values[j] = parseInt(values[j])
                     }
                     data.addRow([
-                      new Date(values[0] *1e3),
-                      parseInt(values[1]),
+                      new Date(ts *1e3),
+                      parseInt(values[0]),
                     ]);
                   }
                   
@@ -176,7 +210,7 @@ class MainHandler(webapp.RequestHandler):
                                   interpolateNulls: false,
                                   hAxis: {title: 'Date Time',  titleTextStyle: {color: '#888'}},
                                   width: 500, height: 400,
-                                 vAxis: {title: 'qps', titleTextStyle: {color: '#888'}},
+                                  vAxis: {title: 'qps', titleTextStyle: {color: '#888'}},
                                  }
                           );
                   setStatus("");
@@ -187,11 +221,6 @@ class MainHandler(webapp.RequestHandler):
                 setStatus("script block executed");
               </script>
         """ % blob_url)
-
-        self.response.out.write("""
-          <div id='status'>Initializing visualization...</div>
-          <div id="visualization" style="width: 500px; height: 400px; border: 1px solid gray;">visualization</div>
-        """)
 
 
     def do_mapreduce(self, start_time_usec, end_time_usec):
@@ -397,6 +426,10 @@ class MainHandler(webapp.RequestHandler):
                 FIELDSET {
                   background-color: #def;
                  margin: 0.5em 0em;
+                }
+                .status {
+                  white-space: pre;
+                  color: blue;
                 }
               </style>
             </head>
