@@ -251,7 +251,7 @@ class MainHandler(webapp.RequestHandler):
             version = %s<br>
             </div>
           """ % (human_time(start_time_usec), start_time_usec, human_time(end_time_usec), end_time_usec, version) )
-        self.response.out.write("""<a href='/'>Refresh page</a>""")
+        self.response.out.write("""<a href='/?version=%s'>&lt;&lt;%s</a>""" % (version, version) )
         now_s = time.time()
         start_time_usec = (now_s - 1 * 60 * 60) * 1e6
         end_time_usec = now_s * 1e6
@@ -400,7 +400,7 @@ class MainHandler(webapp.RequestHandler):
           start_time_usec = long(calendar.timegm(t)) * 1e6
         except ValueError:
           # default to '10 minutes ago'
-          start_time_usec = (time.time() - 3600) * 1e6
+          start_time_usec = (time.time() - 600) * 1e6
 
         # end_time_usec
         try:
@@ -481,8 +481,11 @@ class MainHandler(webapp.RequestHandler):
         # --------------- TITLE ---------------
         self.response.out.write("""
             <div style='float: right;'>git: <a href='http://code.google.com/p/sauer/source/browse/?repo=logservice' target='_blank'>http://code.google.com/p/sauer.logservice/</a></div>
-            <div><a href="/">&lt;&lt; logservice</a></div>
-          """)
+            <div>
+              <a href="/?version=%s">&lt;&lt; %s</a>&nbsp;&nbsp;
+              <a href='/mapreduce' target='_blank'>/mapreduce</a>
+            </div>
+          """ % (version, version) )
         # --------------- 1st FORM ---------------
         self.response.out.write("""
           <fieldset>
@@ -536,7 +539,8 @@ class MainHandler(webapp.RequestHandler):
           <fieldset>
             <legend>Logs MapReduce</legend>
             <form action='/'>
-        """)
+              Application version: <input name='version' value='%s' size='20'><br>
+        """ % version)
 
         self.response.out.write("""
              Only include requests between <input name='start_time_str' value='%s' size='20'>
@@ -565,10 +569,12 @@ class MainHandler(webapp.RequestHandler):
 
           self.response.out.write("""
                 <input type='hidden' name='blob_key'>
+                <input type='hidden' name='version'>
                 <script>
-                  function visualize_map_reduce(blob_key) {
+                  function visualize_map_reduce(version, blob_key) {
                     f = document.forms["visualize_map_reduce_form"];
                     f.blob_key.value = blob_key;
+                    f.version.value = version;
                     f.submit();
                   }
                 </script>
@@ -576,16 +582,18 @@ class MainHandler(webapp.RequestHandler):
 
           for result in results:
             key = result.blob_key
+            v = result.version
             if key == blob_key:
               css_class = "selected"
             else:
               css_class = ""
             self.response.out.write("""
               <div class='%s'>
-                <input type=button onClick='visualize_map_reduce("%s")' value='visualize'>
+                <input type=button onClick='visualize_map_reduce("%s", "%s")' value='visualize'>
                  start_time_usec=%s, end_time_usec=%s, version=%s
-              </div>""" % (css_class, key,
-                           human_time(start_time_usec), human_time(end_time_usec), version) )
+              </div>""" % (css_class,
+                           v, key,
+                           human_time(start_time_usec), human_time(end_time_usec), v) )
             if key == blob_key:
               t = pprint.pformat(db.to_dict(result))
               self.response.out.write("""<pre class='small'>%s</pre>""" % t)
