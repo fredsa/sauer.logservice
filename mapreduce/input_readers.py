@@ -1658,8 +1658,9 @@ class LogInputReader(InputReader):
 
   START_TIME_PARAM = "start_time"
   END_TIME_PARAM = "end_time"
+  VERSION_PARAM = "version"
 
-  def __init__(self, start_time, end_time):
+  def __init__(self, start_time, end_time, version):
     """Constructor.
 
     Args:
@@ -1667,9 +1668,11 @@ class LogInputReader(InputReader):
         epoch, that logs should be retrieved for.
       end_time: The latest time (exclusive), in microseconds since the Unix
         epoch, that logs should be retrieved for.
+      version: The application version that logs should be retrieved for.
     """
     self._start_time = start_time
     self._end_time = end_time
+    self._version = version
 
   def __iter__(self):
     """Iterates over logs in a given range of time.
@@ -1677,7 +1680,7 @@ class LogInputReader(InputReader):
     Yields:
       A RequestLog containing all the information for a single request.
     """
-    for log in logservice.fetch(start_time_usec=long(self._start_time), end_time_usec=long(self._end_time)):
+    for log in logservice.fetch(start_time_usec=long(self._start_time), end_time_usec=long(self._end_time), version_ids=[self._version]):
       yield log
 
   @classmethod
@@ -1690,7 +1693,7 @@ class LogInputReader(InputReader):
     Returns:
       An instance of the InputReader configured using the given JSON parameters.
     """
-    return cls(json["start_time"], json["end_time"])
+    return cls(json["start_time"], json["end_time"], json["version"])
 
   def to_json(self):
     """Returns an input shard state for the remaining inputs.
@@ -1699,7 +1702,8 @@ class LogInputReader(InputReader):
       A JSON serializable version of the remaining input to read.
     """
     return {"start_time": self._start_time,
-            "end_time": self._end_time}
+            "end_time": self._end_time,
+            "version": self._version}
 
   @classmethod
   def split_input(cls, mapper_spec):
@@ -1716,6 +1720,7 @@ class LogInputReader(InputReader):
 
     global_start_time = params[cls.START_TIME_PARAM]
     global_end_time = params[cls.END_TIME_PARAM]
+    version = params[cls.VERSION_PARAM]
     total_time = global_end_time - global_start_time
     time_per_bucket = total_time / shard_count
 
@@ -1731,7 +1736,7 @@ class LogInputReader(InputReader):
       end_times.append(start_times[i+1])
     end_times.append(global_end_time)
 
-    return [LogInputReader(start_times[i], end_times[i])
+    return [LogInputReader(start_times[i], end_times[i], version)
             for i in range(shard_count)]
 
   @classmethod
@@ -1761,5 +1766,9 @@ class LogInputReader(InputReader):
       raise errors.BadReaderParamsError("The starting time cannot be later "
                                         "than or the same as the ending time.")
 
+    if cls.VERSION_PARAM not in params:
+      raise errors.BadReaderParamsError("Must specify a version for "
+                                        "mapper input")
+
   def __str__(self):
-    return "%s:%s" % (self._start_time, self._end_time)
+    return "%s:%s:%s" % (self._start_time, self._end_time, self._version)

@@ -37,15 +37,15 @@ def human_time(time_usec):
     return time.strftime(TIME_FORMAT, time.gmtime(time_usec / 1e6) )
 
 
-class LogServiceMapReduceResult(db.Model):
+class LogServiceMapReduceResult(db.Expando):
   start_minute = db.IntegerProperty()
   requests = db.ListProperty(int)
   blob_key = db.StringProperty()
 
 class MyPipeline(base_handler.PipelineBase):
 
-  def run(self, start_time_usec, end_time_usec):
-    logging.info('*********************************** MyPipeline.run(self, %d, %d)' % (start_time_usec, end_time_usec) )
+  def run(self, start_time_usec, end_time_usec, version):
+    logging.info('*********************************** MyPipeline.run(self, %d, %d, %s)' % (start_time_usec, end_time_usec, version) )
     output = yield mapreduce_pipeline.MapreducePipeline(
         "My MapReduce",
         "main.my_map",
@@ -55,12 +55,13 @@ class MyPipeline(base_handler.PipelineBase):
         mapper_params={
             "start_time": start_time_usec,
             "end_time": end_time_usec,
+            "version": version,
         },
         reducer_params={
             "mime_type": "text/plain",
         },
         shards=1)
-    yield StoreOutput("MyPiplineOutput", start_time_usec, end_time_usec, output)
+    yield StoreOutput(start_time_usec, end_time_usec, version, output)
 
 def my_map(log):
   """My map function."""
@@ -77,14 +78,15 @@ def my_reduce(key, values):
   logging.info('--------------------------------------- REDUCE: key=%s, values=%s ----------------------------------' % (key, values) )
   yield "%s,%d\n" % (key, len(values))
 
+
 class StoreOutput(base_handler.PipelineBase):
   """A pipeline to store the result of the MapReduce job in the datastore.
   """
 
-  def run(self, mr_kind, start_time_usec, end_time_usec, blob_keys):
+  def run(self, start_time_usec, end_time_usec, version, blob_keys):
     for blob_key in blob_keys: 
-      logging.info("********************************************** StoreOutput.run(self, mr_kind=%s, start_time_usec=%d, end_time_usec=%d, blob_keys=%s)" % (mr_kind, start_time_usec, end_time_usec, blob_key) )
-      result = LogServiceMapReduceResult(blob_key=blob_key)
+      logging.info("********************************************** StoreOutput.run(self, blob_key=%s, start_time_usec=%d, end_time_usec=%d, version=%s)" % (blob_key, start_time_usec, end_time_usec, version) )
+      result = LogServiceMapReduceResult(blob_key=blob_key, start_time_usec=start_time_usec, end_time_usec=end_time_usec, version=version)
       db.put(result)
 
 
@@ -239,16 +241,22 @@ class MainHandler(webapp.RequestHandler):
         """ % (smooth_seconds, blob_key) )
 
 
-    def do_mapreduce(self, start_time_usec, end_time_usec):
+    def do_mapreduce(self, start_time_usec, end_time_usec, version):
         
         self.response.out.write("""<h1>MapReduce launched</h1>""")
-        self.response.out.write("""<div class='status'>start_time_usec = %s (%d)<br>end_time_usec = %s (%d)</div>""" % (human_time(start_time_usec), start_time_usec, human_time(end_time_usec), end_time_usec) )
+        self.response.out.write("""
+            <div class='status'>
+            start_time_usec = %s (%d)<br>
+            end_time_usec = %s (%d)<br>
+            version = %s<br>
+            </div>
+          """ % (human_time(start_time_usec), start_time_usec, human_time(end_time_usec), end_time_usec, version) )
         self.response.out.write("""<a href='/'>Refresh page</a>""")
         now_s = time.time()
         start_time_usec = (now_s - 1 * 60 * 60) * 1e6
         end_time_usec = now_s * 1e6
 
-        pipeline = MyPipeline(start_time_usec, end_time_usec)
+        pipeline = MyPipeline(start_time_usec, end_time_usec, version)
         logging.info('************************************************************************************************************************************************')
         logging.info('*************************************************************** pipeline.start() ***************************************************************')
         logging.info('************************************************************************************************************************************************')
@@ -459,6 +467,12 @@ class MainHandler(webapp.RequestHandler):
                   font-family: monospace;
                   margin: 0.4em 0em;
                 }
+                .selected {
+                  font-weight: bold;
+                }
+                pre.small {
+                  font-size: 0.8em;
+                }
               </style>
             </head>
             <body>
@@ -466,6 +480,7 @@ class MainHandler(webapp.RequestHandler):
 
         # --------------- TITLE ---------------
         self.response.out.write("""
+            <div style='float: right;'>git: <a href='http://code.google.com/p/sauer/source/browse/?repo=logservice' target='_blank'>http://code.google.com/p/sauer.logservice/</a></div>
             <div><a href="/">&lt;&lt; logservice</a></div>
           """)
         # --------------- 1st FORM ---------------
@@ -538,7 +553,7 @@ class MainHandler(webapp.RequestHandler):
           </fieldset>
           """)
 
-        results = db.Query(LogServiceMapReduceResult).fetch(limit=10)
+        results = db.Query(LogServiceMapReduceResult).order('-end_time_usec').fetch(limit=10)
         if results:
           self.response.out.write("""
             <fieldset>
@@ -561,15 +576,21 @@ class MainHandler(webapp.RequestHandler):
 
           for result in results:
             key = result.blob_key
-            t = pprint.pformat(db.to_dict(result))
             if key == blob_key:
               css_class = "selected"
             else:
               css_class = ""
-            self.response.out.write("""<input type=button onClick='visualize_map_reduce("%s")' class='%s' value='visualize'> %s<br>""" % (key, css_class, t) )
+            self.response.out.write("""
+              <div class='%s'>
+                <input type=button onClick='visualize_map_reduce("%s")' value='visualize'>
+                 start_time_usec=%s, end_time_usec=%s, version=%s
+              </div>""" % (css_class, key,
+                           human_time(start_time_usec), human_time(end_time_usec), version) )
+            if key == blob_key:
+              t = pprint.pformat(db.to_dict(result))
+              self.response.out.write("""<pre class='small'>%s</pre>""" % t)
 
           self.response.out.write("""
-
                 <input type='hidden' name='desired_action' value='visualize'>
               </form>
             </fieldset>
@@ -577,7 +598,7 @@ class MainHandler(webapp.RequestHandler):
 
         # --------------- Conditional content ---------------
         if desired_action == "mapreduce":
-          self.do_mapreduce(start_time_usec, end_time_usec)
+          self.do_mapreduce(start_time_usec, end_time_usec, version)
         elif desired_action == "grep":
           self.do_grep(version, max_requests, level, start_time_usec, end_time_usec, precision_ms, raw_logs)
         elif desired_action == "visualize":
