@@ -125,24 +125,77 @@ class MainHandler(webapp.RequestHandler):
         self.response.out.write("""</pre>""")
 
 
-    def do_mapreduce(self, start_time_usec, end_time_usec):
+    def do_visualize(self, blob_url):
+
         # --------------- MapReduce results ---------------
         self.response.out.write("""<h1>MapReduce results</h1>""")
-        self.response.out.write("""
-          <div id="visualization" style="width: 500px; height: 400px; border: 1px solid gray;">visualization</div>
-          <hr>
-          <pre id="csv-data">csv-data</pre>
-          <hr>
-        """)
-        
-        results = Result.all()
-        for result in results:
-          url = result.url
-          t = pprint.pformat(db.to_dict(result))
-          t = t.replace(url, """<a href='javascript:showGraph("%s")'>%s</a>""" % (url, url))
-          self.response.out.write('<pre>%s</pre>' % url)
-          self.response.out.write('<pre>%s</pre>' % t)
+        self.response.out.write(r"""
+              <script type="text/javascript" src="https://www.google.com/jsapi"></script>
+              <script type="text/javascript">
+                google.load('visualization', '1', {packages: ['corechart']});
+              </script>
+              <script type="text/javascript">
+                function setStatus(status) {
+                  document.getElementById("status").innerHTML = status;
+                }
 
+                function showGraph(url) {
+                  setStatus("Fetching content from " + url);
+
+                  var xmlhttp = new XMLHttpRequest();
+                  xmlhttp.open("GET", url, false);
+                  xmlhttp.send();
+
+                  setStatus("XHR completed");
+
+                  var response = xmlhttp.responseText;
+          
+                  var data = new google.visualization.DataTable();
+                  data.addColumn('datetime', 'request start time');
+                  data.addColumn('number', 'qps');
+                  
+                  setStatus("Parsing CSV data...");
+                  var lines = response.split('\n');
+                  for (i in lines) {
+                    line = lines[i];
+                    setStatus("Parsing row " + i + " with data " + line);
+                    values = line.split(",");
+                    for (j in values) {
+                       values[j] = parseInt(values[j])
+                    }
+                    data.addRow([
+                      new Date(values[0] *1e3),
+                      parseInt(values[1]),
+                    ]);
+                  }
+                  
+                  setStatus("Visualizing results...");
+                  new google.visualization.AreaChart(document.getElementById('visualization')).
+                      draw(data, {legend: "none",
+                                  curveType: "none",
+                                  interpolateNulls: false,
+                                  hAxis: {title: 'Date Time',  titleTextStyle: {color: '#888'}},
+                                  width: 500, height: 400,
+                                 vAxis: {title: 'qps', titleTextStyle: {color: '#888'}},
+                                 }
+                          );
+                  setStatus("");
+                }
+            
+                google.setOnLoadCallback(function() { showGraph("%s"); });
+
+                setStatus("script block executed");
+              </script>
+        """ % blob_url)
+
+        self.response.out.write("""
+          <div id='status'>Initializing visualization...</div>
+          <div id="visualization" style="width: 500px; height: 400px; border: 1px solid gray;">visualization</div>
+        """)
+
+
+    def do_mapreduce(self, start_time_usec, end_time_usec):
+        
         now_s = time.time()
         start_time_usec = (now_s - 1 * 60 * 60) * 1e6
         end_time_usec = now_s * 1e6
@@ -303,6 +356,10 @@ class MainHandler(webapp.RequestHandler):
         # desired_action
         desired_action=self.request.get("desired_action")
 
+        # blob_url
+        blob_url = self.request.get('blob_url')
+
+
         #logging.debug("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%DEBUG")
         #logging.info("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%INFO")
         #logging.warning("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%WARNING")
@@ -311,7 +368,7 @@ class MainHandler(webapp.RequestHandler):
 
 
         # --------------- HTML Page ---------------
-        self.response.out.write(r"""
+        self.response.out.write("""
           <html>
             <head>
               <title>Logservice %s</title>
@@ -337,63 +394,11 @@ class MainHandler(webapp.RequestHandler):
                   color: #888;
                   margin: 0em 0em .5em 0em;
                 }
-              </style>
-              <script type="text/javascript" src="https://www.google.com/jsapi"></script>
-              <script type="text/javascript">
-                google.load('visualization', '1', {packages: ['corechart']});
-              </script>
-              <script type="text/javascript">
-                function showGraph(url) {
-                  document.getElementById("csv-data").innerHTML += "<hr>";
-                  var xmlhttp = new XMLHttpRequest();
-                  xmlhttp.open("GET", url, false);
-                  xmlhttp.send();
-                  
-                  var response = xmlhttp.responseText;
-                  document.getElementById("csv-data").innerHTML = response;
-          
-                  var data = new google.visualization.DataTable();
-                  data.addColumn('datetime', 'request start time');
-                  data.addColumn('number', 'qps');
-                  
-                  var lines = response.split('\n');
-                  for (i in lines) {
-                    line = lines[i];
-                    if (i==0) {line = "1321583104,20"}
-                    //if (i==1) {line = "1321583114,20"}
-                    //if (i==2) {line = "1321583214,0"}
-                    //document.getElementById("csv-data").innerHTML += line + " (line.length=" + line.length+ ")<br>";
-                    values = line.split(",");
-                    for (j in values) {
-                       values[j] = parseInt(values[j])
-                    }
-                    //document.getElementById("csv-data").innerHTML += values + " (values.length=" + values.length+ ")<br>";
-                    data.addRow([
-                      //values[0]-1321583114,
-                      new Date(values[0] *1e3),
-                      parseInt(values[1]),
-                    ]);
-                    //data.addRow(values);
-                    //document.getElementById("csv-data").innerHTML += "values=" + values[0] + " / " + values[1] + "<br>";
-                  }
-                  
-                  // Create and draw the visualization.
-                  
-                  new google.visualization.AreaChart(document.getElementById('visualization')).
-                  //new google.visualization.LineChart(document.getElementById('visualization')).
-                      draw(data, {legend: "none",
-                                  curveType: "none",
-                                  interpolateNulls: false,
-                                  hAxis: {title: 'Date Time',  titleTextStyle: {color: '#888'}},
-                                  width: 500, height: 400,
-                                 vAxis: {title: 'qps', titleTextStyle: {color: '#888'}},
-                                 }
-                          );
+                FIELDSET {
+                  background-color: #def;
+                 margin: 0.5em 0em;
                 }
-            
-                google.setOnLoadCallback(function() {document.getElementById("csv-data").innerHTML += "GRAPHS READY"});
-              </script>
-
+              </style>
             </head>
             <body>
           """ % app_identity.get_application_id() )
@@ -404,7 +409,7 @@ class MainHandler(webapp.RequestHandler):
           """)
         # --------------- 1st FORM ---------------
         self.response.out.write("""
-          <fieldset style='background-color: #def'>
+          <fieldset>
             <legend>Logs Filter</legend>
             <form action='/'>
               Application version: <input name='version' value='%s' size='20'><br>
@@ -439,7 +444,7 @@ class MainHandler(webapp.RequestHandler):
         self.response.out.write("""
               Histogram precision: <input name='precision_ms' value='%s' size='5'>ms<br>
           """ % precision_ms)
- 
+
         self.response.out.write("""
               <input type='checkbox' name='raw_logs' %s> Pretty print raw logs<br>
 
@@ -448,11 +453,11 @@ class MainHandler(webapp.RequestHandler):
 
             </form>
           </fieldset>
-          <br>""" % checked)
+          """ % checked)
 
         # --------------- 2nd FORM ---------------
         self.response.out.write("""
-          <fieldset style='background-color: #def'>
+          <fieldset>
             <legend>Logs MapReduce</legend>
             <form action='/'>
         """)
@@ -462,20 +467,51 @@ class MainHandler(webapp.RequestHandler):
              and <input name='end_time_str' value='%s' size='20'><br>
           """ % (start_time_str, end_time_str))
  
- 
         self.response.out.write("""
               <input type='hidden' name='desired_action' value='mapreduce'>
               <input type='submit' value='Kick Off MapReduce'>
+          """)
 
+        self.response.out.write("""
             </form>
           </fieldset>
           """)
+
+        results = db.Query(Result).fetch(limit=10)
+        if results:
+          self.response.out.write("""
+            <fieldset>
+              <legend>Visualize MapReduce results</legend>
+              <form action='/'>
+
+                <select name='blob_url' onChange='this.parentNode.submit()'>
+                <option value=''>(select blob to view)</option>
+            """)
+
+          for result in results:
+            url = result.url
+            t = pprint.pformat(db.to_dict(result))
+            if url == blob_url:
+              selected = "selected"
+            else:
+              selected = ""
+            self.response.out.write("""<option value='%s' %s>%s</option>""" % (url, selected, t) )
+
+          self.response.out.write("""
+                </select><br>
+
+                <input type='hidden' name='desired_action' value='visualize'>
+              </form>
+            </fieldset>
+            """)
 
         # --------------- Conditional content ---------------
         if desired_action == "mapreduce":
           self.do_mapreduce(start_time_usec, end_time_usec)
         elif desired_action == "grep":
           self.do_grep(version, max_requests, level, start_time_usec, end_time_usec, precision_ms, raw_logs)
+        elif desired_action == "visualize":
+          self.do_visualize(blob_url)
 
         # --------------- End of page ---------------
         self.response.out.write("""
