@@ -60,7 +60,7 @@ class MyPipeline(base_handler.PipelineBase):
         reducer_params={
             "mime_type": "text/plain",
         },
-        shards=1)
+        shards=10)
     yield StoreOutput(start_time_usec, end_time_usec, version, output)
 
 def my_map(log):
@@ -135,7 +135,8 @@ class MainHandler(webapp.RequestHandler):
 
         self.response.out.write("""
           <div id='status' class='status'>Initializing visualization...</div>
-          <div id="visualization" style="width: 500px; height: 400px; border: 1px solid gray;">visualization</div>
+          <div id="visualization" style="stlye: visibility: hidden; width: 500px; height: 400px; border: 1px solid gray;">visualization</div>
+          <pre id="blob_data"></pre>
         """)
 
         self.response.out.write(r"""
@@ -155,6 +156,10 @@ class MainHandler(webapp.RequestHandler):
                 }
 
                 function showGraph(url) {
+                  if (!url.match(/blobstore/)) {
+                    setStatus("Invalid blobstore URL " + url);
+                    return;
+                  }
                   setStatus("Fetching content from " + url);
 
                   var xhr = new XMLHttpRequest();
@@ -176,15 +181,25 @@ class MainHandler(webapp.RequestHandler):
                 }
 
                 function showData(response) {
+                  document.getElementById("blob_data").innerHTML = response;
+                  console.log("response=" + response);
+
                   var data = new google.visualization.DataTable();
                   data.addColumn('datetime', 'request start time');
                   data.addColumn('number', 'qps');
                   
+                  response = response.trim();
+                  if (!response) {
+                    setStatus("No data. Empty CSV.");
+                    document.getElementById('visualization').innerHTML = "NONE";
+                    return;
+                  }
+
                   var lines = response.split('\n');
                   setStatus("Parsing " + (lines.length) + " lines of CSV data...");
                   
                   // testing
-                  s = lines[0].split(",", 2); lines[0] = s[0] - 600 + "," + s[1]
+                  // s = lines[0].split(",", 2); lines[0] = s[0] - 600 + "," + s[1]
 
                   map = []
                   for (i in lines) {
@@ -223,6 +238,7 @@ class MainHandler(webapp.RequestHandler):
                   }
                   
                   setStatus("Visualizing results...");
+                  document.getElementById('visualization').style.visibility = "";
                   new google.visualization.AreaChart(document.getElementById('visualization')).
                       draw(data, {legend: "none",
                                   interpolateNulls: false,
@@ -593,7 +609,7 @@ class MainHandler(webapp.RequestHandler):
                  start_time_usec=%s, end_time_usec=%s, version=%s
               </div>""" % (css_class,
                            v, key,
-                           human_time(start_time_usec), human_time(end_time_usec), v) )
+                           human_time(result.start_time_usec), human_time(result.end_time_usec), v) )
             if key == blob_key:
               t = pprint.pformat(db.to_dict(result))
               self.response.out.write("""<pre class='small'>%s</pre>""" % t)
