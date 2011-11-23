@@ -187,6 +187,7 @@ class MainHandler(webapp.RequestHandler):
                   var data = new google.visualization.DataTable();
                   data.addColumn('datetime', 'request start time');
                   data.addColumn('number', 'qps');
+                  cols = data.getNumberOfColumns() - 1;
                   
                   response = response.trim();
                   if (!response) {
@@ -220,33 +221,44 @@ class MainHandler(webapp.RequestHandler):
                   }
 
                   for (ts = min; ts <= max; ts += smooth_seconds) {
-                    totals=[0]
+                    totals = new Array(cols);
+                    for (t = 0; t < cols; t++) {
+                      totals[t] = 0;
+                    }
+
                     for (ts2 = ts; ts2 < ts + smooth_seconds; ts2++) {
                       values = map[String(ts2)]
-                      setStatus("Parsing values timestamp " + ts2 + " for datapoint at " + ts + " : " + values);
-                      if (!values) continue;
-                      values = values.split(",");
-                      for (j in values) {
-                         totals[j] += parseInt(values[j])
+                      setStatus("Parsing values timestamp " + ts2 + " for datapoint at " + ts + ": " + values);
+                      if (values) {
+                        values = values.split(",");
+                        for (j = 0; j < cols; j++) {
+                           console.log("typeof values[" + j + "] = " + typeof values[j]);
+                           totals[j] += parseInt(values[j])
+                        }
                       }
                     }
 
                     data.addRow([
                       new Date(ts * 1e3),
-                      parseInt(totals[0] / smooth_seconds),
+                      parseInt(totals[0]) / smooth_seconds,
                     ]);
                   }
                   
                   setStatus("Visualizing results...");
                   document.getElementById('visualization').style.visibility = "";
-                  new google.visualization.AreaChart(document.getElementById('visualization')).
-                      draw(data, {legend: "none",
-                                  interpolateNulls: false,
-                                  hAxis: {title: 'Date Time',  titleTextStyle: {color: '#888'}},
-                                  width: 500, height: 400,
-                                  vAxis: {title: 'qps', titleTextStyle: {color: '#888'}},
-                                 }
-                          );
+
+                  if (smooth_seconds >= (max - min) ) {
+                    chart =  new google.visualization.ColumnChart(document.getElementById('visualization'));
+                  } else {
+                    chart =  new google.visualization.AreaChart(document.getElementById('visualization'));
+                  }
+                  //new google.visualization.AreaChart(document.getElementById('visualization')).
+                  chart.draw(data, {legend: "none",
+                                    interpolateNulls: false,
+                                    hAxis: {title: 'Date Time',  titleTextStyle: {color: '#888'}},
+                                    width: 500, height: 400,
+                                    vAxis: {title: 'qps', titleTextStyle: {color: '#888'}},
+                             });
                   setStatus("Showing results smoothed over " + smooth_seconds + " seconds for <a href='" + blob_url + "'>" + blob_url + "</a>");
                 }
             
@@ -584,7 +596,7 @@ class MainHandler(webapp.RequestHandler):
             """ % smooth_seconds)
 
           self.response.out.write("""
-                <input type='hidden' name='blob_key'>
+                <input type='hidden' name='blob_key' value='%s'>
                 <input type='hidden' name='version'>
                 <script>
                   function visualize_map_reduce(version, blob_key) {
@@ -594,7 +606,7 @@ class MainHandler(webapp.RequestHandler):
                     f.submit();
                   }
                 </script>
-            """)
+            """ % blob_key)
 
           for result in results:
             key = result.blob_key
