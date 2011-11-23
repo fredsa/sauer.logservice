@@ -591,22 +591,39 @@ class MainHandler(webapp.RequestHandler):
             <fieldset>
               <legend>Visualize MapReduce results</legend>
               <form action='/' name='visualize_map_reduce_form'>
-
-                Smooth results over <input name='smooth_seconds' value='%s' size='10'> seconds<br>
-            """ % smooth_seconds)
+            """)
 
           self.response.out.write("""
                 <input type='hidden' name='blob_key' value='%s'>
                 <input type='hidden' name='version'>
                 <script>
                   function visualize_map_reduce(version, blob_key) {
+                    console.log("version= " + version);
+                    console.log("blob_key= " + blob_key);
                     f = document.forms["visualize_map_reduce_form"];
                     f.blob_key.value = blob_key;
                     f.version.value = version;
                     f.submit();
                   }
+
+                  function set_smooth_seconds(s) {
+                    f = document.forms["visualize_map_reduce_form"];
+                    f.smooth_seconds.value = s;
+                    f.submit();
+                  }
                 </script>
             """ % blob_key)
+
+          self.response.out.write("""
+                Smooth results over <input name='smooth_seconds' value='%s' size='10'> (&#8592;
+            """ % smooth_seconds)
+          for s in [1, 10, 60, 300, 600, 3600]:
+            if s == smooth_seconds:
+              selected = "selected"
+            else:
+              selected = ""
+            self.response.out.write("""<input type='button' value='%d' onClick='set_smooth_seconds(this.value);' class='%s'>""" % (s, selected) )
+          self.response.out.write(""") seconds<br>""")
 
           for result in results:
             key = result.blob_key
