@@ -44,8 +44,8 @@ class LogServiceMapReduceResult(db.Expando):
 
 class MyPipeline(base_handler.PipelineBase):
 
-  def run(self, start_time_usec, end_time_usec, version):
-    logging.info('*********************************** MyPipeline.run(self, %d, %d, %s)' % (start_time_usec, end_time_usec, version) )
+  def run(self, shards, start_time_usec, end_time_usec, version):
+    logging.info('*********************************** MyPipeline.run(self, %d, %d, %d, %s)' % (shards, start_time_usec, end_time_usec, version) )
     output = yield mapreduce_pipeline.MapreducePipeline(
         "My MapReduce",
         "main.my_map",
@@ -60,7 +60,7 @@ class MyPipeline(base_handler.PipelineBase):
         reducer_params={
             "mime_type": "text/plain",
         },
-        shards=10)
+        shards=shards)
     yield StoreOutput(start_time_usec, end_time_usec, version, output)
 
 def my_map(log):
@@ -269,22 +269,23 @@ class MainHandler(webapp.RequestHandler):
         """ % (smooth_seconds, blob_key) )
 
 
-    def do_mapreduce(self, start_time_usec, end_time_usec, version):
+    def do_mapreduce(self, shards, start_time_usec, end_time_usec, version):
         
         self.response.out.write("""<h1>MapReduce launched</h1>""")
         self.response.out.write("""
             <div class='status'>
+            shards = %d<br>
             start_time_usec = %s (%d)<br>
             end_time_usec = %s (%d)<br>
             version = %s<br>
             </div>
-          """ % (human_time(start_time_usec), start_time_usec, human_time(end_time_usec), end_time_usec, version) )
+          """ % (shards, human_time(start_time_usec), start_time_usec, human_time(end_time_usec), end_time_usec, version) )
         self.response.out.write("""<a href='/?version=%s'>&lt;&lt;%s</a>""" % (version, version) )
         now_s = time.time()
         start_time_usec = (now_s - 1 * 60 * 60) * 1e6
         end_time_usec = now_s * 1e6
 
-        pipeline = MyPipeline(start_time_usec, end_time_usec, version)
+        pipeline = MyPipeline(shards, start_time_usec, end_time_usec, version)
         logging.info('************************************************************************************************************************************************')
         logging.info('*************************************************************** pipeline.start() ***************************************************************')
         logging.info('************************************************************************************************************************************************')
@@ -451,6 +452,12 @@ class MainHandler(webapp.RequestHandler):
         except ValueError:
           smooth_seconds = 60
 
+        # shards
+        try:
+          shards = long(self.request.get('shards'))
+        except ValueError:
+          shards = 10
+
 
         #logging.debug("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%DEBUG")
         #logging.info("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%INFO")
@@ -576,6 +583,10 @@ class MainHandler(webapp.RequestHandler):
           """ % (start_time_str, end_time_str))
  
         self.response.out.write("""
+              Using <input name='shards' value='%d' size='3'> shards<br>
+          """ % shards)
+
+        self.response.out.write("""
               <input type='hidden' name='desired_action' value='mapreduce'>
               <input type='submit' value='Kick Off MapReduce'>
           """)
@@ -651,7 +662,7 @@ class MainHandler(webapp.RequestHandler):
 
         # --------------- Conditional content ---------------
         if desired_action == "mapreduce":
-          self.do_mapreduce(start_time_usec, end_time_usec, version)
+          self.do_mapreduce(shards, start_time_usec, end_time_usec, version)
         elif desired_action == "grep":
           self.do_grep(version, max_requests, level, start_time_usec, end_time_usec, precision_ms, raw_logs)
         elif desired_action == "visualize":
