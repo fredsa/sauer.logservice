@@ -70,13 +70,28 @@ def my_map(log):
   data = pprint.pformat(vars(log))
   data = cgi.escape(data)
   start_time_s = int(log.start_time() / 1e6)
-  yield(start_time_s, 1)
+  end_time_s = int(log.end_time() / 1e6)
+  yield(start_time_s, '[1, 0]')
+  logging.info('%d: hit' % start_time_s)
+  for t in range(start_time_s, end_time_s + 1):
+    if t != start_time_s:
+      logging.info('%d: continued at %d **********************************************************' % (start_time_s, t) )
+      logging.info('log.start_time() = %d, log.end_time() = %d' % (log.start_time(), log.end_time()) )
+    yield(t, '[0, 1]')
+  
 
 def my_reduce(key, values):
-  """Word Count reduce function."""
+  """My reduce function."""
 
   logging.info('--------------------------------------- REDUCE: key=%s, values=%s ----------------------------------' % (key, values) )
-  yield "%s,%d\n" % (key, len(values))
+  # convert list of list of strings -> list of list of ints
+  #values = [[int(a) for a in x] for x in values]
+  values = [eval(a) for a in values]
+
+  # sum elements of array
+  values = [sum(a) for a in zip(*values)]
+
+  yield "%s,%s\n" % (key, values)
 
 
 class StoreOutput(base_handler.PipelineBase):
@@ -182,11 +197,11 @@ class MainHandler(webapp.RequestHandler):
 
                 function showData(response) {
                   document.getElementById("blob_data").innerHTML = response;
-                  console.log("response=" + response);
 
                   var data = new google.visualization.DataTable();
                   data.addColumn('datetime', 'request start time');
                   data.addColumn('number', 'qps');
+                  data.addColumn('number', 'conc reqs');
                   cols = data.getNumberOfColumns() - 1;
                   
                   response = response.trim();
@@ -206,9 +221,9 @@ class MainHandler(webapp.RequestHandler):
                   for (i in lines) {
                     line = lines[i];
                     if (!line) continue;
-                    s = line.split(",", 2);
-                    setStatus("Scanning row " + i + " with data " + line + "   s[1] = " + s[1]);
-                    map[String(s[0])] = s[1];
+                    s = /(.*?),(.*)/.exec(line);
+                    //setStatus("Scanning row " + i + " with data " + line + "  -->  s[1] = " + s[1] + ", s[2] = " + s[2]);
+                    map[String(s[1])] = s[2];
 
                     ts = parseInt(s[0])
                     if (i == 0) {
@@ -228,11 +243,12 @@ class MainHandler(webapp.RequestHandler):
 
                     for (ts2 = ts; ts2 < ts + smooth_seconds; ts2++) {
                       values = map[String(ts2)]
-                      setStatus("Parsing values timestamp " + ts2 + " for datapoint at " + ts + ": " + values);
+                      //setStatus("Parsing values timestamp " + ts2 + " for datapoint at " + ts + ": " + values);
                       if (values) {
+                        values = values.replace(/[\[\]]/g, "");
                         values = values.split(",");
                         for (j = 0; j < cols; j++) {
-                           console.log("typeof values[" + j + "] = " + typeof values[j]);
+                           //console.log("typeof values[" + j + "] = " + values[j] + " which is a " + typeof values[j]);
                            totals[j] += parseInt(values[j])
                         }
                       }
@@ -241,6 +257,7 @@ class MainHandler(webapp.RequestHandler):
                     data.addRow([
                       new Date(ts * 1e3),
                       parseInt(totals[0]) / smooth_seconds,
+                      parseInt(totals[1]) / smooth_seconds,
                     ]);
                   }
                   
@@ -253,7 +270,7 @@ class MainHandler(webapp.RequestHandler):
                     chart =  new google.visualization.AreaChart(document.getElementById('visualization'));
                   }
                   //new google.visualization.AreaChart(document.getElementById('visualization')).
-                  chart.draw(data, {legend: "none",
+                  chart.draw(data, {legend: "top",
                                     interpolateNulls: false,
                                     hAxis: {title: 'Date Time',  titleTextStyle: {color: '#888'}},
                                     width: 500, height: 400,
