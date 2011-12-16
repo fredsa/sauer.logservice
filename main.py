@@ -333,13 +333,14 @@ class MainHandler(webapp.RequestHandler):
         messages={}
         count = 0
         logging.info("fetch(start_time=%s, end_time=%s, ...)" % (start_time, end_time) )
-        for log in logservice.fetch(start_time=start_time,
+        logs = logservice.fetch(start_time=start_time,
                                     end_time=end_time,
                                     minimum_log_level=level,
                                     include_app_logs=True,
                                     #include_incomplete=True,
                                     version_ids=[version]
-                                   ):
+                                   )
+        for log in logs:
           #self.response.out.write('%s<br>' % log)
 
           # --------------- Raw logs ---------------
@@ -360,7 +361,6 @@ class MainHandler(webapp.RequestHandler):
               data = pprint.pformat(data)
               data = cgi.escape(data)
               self.response.out.write("""%s<pre class='errmsg'>%s</pre><br>""" % (pretty_level(line.level), data))
-
 
           res = """[%s] %s""" % (log.status, log.resource)
           index = int( (log.latency - log.pending_time) * 1000 / precision_ms) 
@@ -386,6 +386,11 @@ class MainHandler(webapp.RequestHandler):
           count += 1
           if count == max_requests:
             break
+
+        self.response.out.write("""<h1>Summary</h1>""")
+        self.response.out.write("""<pre>""")
+        self.response.out.write("""Rows retrieved: %d\n""" % count)
+        self.response.out.write("""</pre>""")
 
         if raw_logs:
           self.response.out.write('<hr>')
@@ -496,14 +501,10 @@ class MainHandler(webapp.RequestHandler):
               <style>
                 BODY {
                   font-family: arial;
+                  padding: .8em;
                 }
                 LEGEND {
                   font-weight: bold;
-                }
-                pre.errmsg {
-                  background-color: #d9d9d9;
-                  padding: 0.4em 0.1em;
-                  margin: 0em;
                 }
                 H1 {
                   font-size: 1.4em;
@@ -527,8 +528,16 @@ class MainHandler(webapp.RequestHandler):
                 .selected {
                   font-weight: bold;
                 }
-                pre.small {
+                PRE {
+                 padding-left: 1em;
+                }
+                PRE.small {
                   font-size: 0.8em;
+                }
+                PRE.errmsg {
+                  background-color: #d9d9d9;
+                  padding: 0.4em 0.1em;
+                  margin: 0em;
                 }
                 .level_INFO {
                   color: red;
