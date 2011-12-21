@@ -32,10 +32,10 @@ LEVEL = {
 }
 
 MAX_LATENCY_WIDTH = 100
-TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
+TIME_FORMAT = '%Y-%m-%d %H:%M:%S %Z'
 
 def human_time(time_s):
-    return time.strftime(TIME_FORMAT, time.gmtime(time_s) )
+    return time.strftime(TIME_FORMAT, time.localtime(time_s) )
 
 def record_to_dict(rec):
   return dict((x, getattr(rec, x)) for x in dir(rec) if x[0] != '_')
