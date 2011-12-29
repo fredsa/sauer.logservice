@@ -32,10 +32,10 @@ LEVEL = {
 }
 
 MAX_LATENCY_WIDTH = 100
-TIME_FORMAT = '%Y-%m-%d %H:%M:%S'
+TIME_FORMAT = '%Y-%m-%d %H:%M:%S %Z'
 
 def human_time(time_s):
-    return time.strftime(TIME_FORMAT, time.gmtime(time_s) )
+    return time.strftime(TIME_FORMAT, time.localtime(time_s) )
 
 def record_to_dict(rec):
   return dict((x, getattr(rec, x)) for x in dir(rec) if x[0] != '_')
@@ -352,8 +352,9 @@ class MainHandler(webapp.RequestHandler):
             self.response.out.write('<hr><pre>%s</pre><br>' % data)
 
           for line in log.app_logs:
-            msg = "[%s] %s]" % ( LEVEL[line.level], line.message )
-            #self.response.out.write('[%s][%s] %s<br>' % (time.strftime('%Y-%m-%d %H:%M:%S %Z', time.localtime(line.time)), line.level, cgi.escape(str( msg ))) )
+            safe_msg = pprint.pformat(line.message) # message may include binary data
+            msg = "[%s] %s" % ( LEVEL[line.level], safe_msg )
+            #self.response.out.write('[%s][%s] %s<br>' % (time.strftime('%Y-%m-%d %H:%M:%S %Z', time.localtime(line.time)), line.level, cgi.escape( safe_msg )) )
             messages[msg] = messages.get(msg, 0) + 1
             # --------------- Raw logs ---------------
             if raw_logs:
