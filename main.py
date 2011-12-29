@@ -7,6 +7,7 @@ import pprint
 import time
 import calendar
 import os
+import math
 
 from google.appengine.ext import webapp
 from google.appengine.ext import db
@@ -50,12 +51,12 @@ class LogServiceMapReduceResult(db.Expando):
 
 class MyPipeline(base_handler.PipelineBase):
 
-  def run(self, shards, start_time, end_time, version):
-    logging.info('*********************************** MyPipeline.run(self, %d, %d, %d, %s)' % (shards, start_time, end_time, version) )
+  def run(self, mr_type, shards, start_time, end_time, version):
+    logging.info('*********************************** MyPipeline.run(self, %s, %d, %d, %d, %s)' % (mr_type, shards, start_time, end_time, version) )
     output = yield mapreduce_pipeline.MapreducePipeline(
         "My MapReduce",
-        "main.my_map",
-        "main.my_reduce",
+        "main.my_%s_map" % mr_type,
+        "main.my_%s_reduce" % mr_type,
         "mapreduce.input_readers.LogInputReader",
         "mapreduce.output_writers.BlobstoreOutputWriter",
         mapper_params={
@@ -69,7 +70,20 @@ class MyPipeline(base_handler.PipelineBase):
         shards=shards)
     yield StoreOutput(start_time, end_time, version, output)
 
-def my_map(log):
+def my_collect_map(log):
+  """My map function."""
+
+  logging.info('--------------------------------------- Map Something ----------------------------------')
+  yield(log.combined, '')
+  
+
+def my_collect_reduce(key, values):
+  """My reduce function."""
+
+  yield key
+
+
+def my_graph_map(log):
   """My map function."""
 
   logging.info('--------------------------------------- Map Something ----------------------------------')
@@ -82,12 +96,11 @@ def my_map(log):
     yield(t, '[0, 1]')
   
 
-def my_reduce(key, values):
+def my_graph_reduce(key, values):
   """My reduce function."""
 
   logging.info('--------------------------------------- REDUCE: key=%s, values=%s ----------------------------------' % (key, values) )
   # convert list of list of strings -> list of list of ints
-  #values = [[int(a) for a in x] for x in values]
   values = [eval(a) for a in values]
 
   # sum elements of array
@@ -289,23 +302,24 @@ class MainHandler(webapp.RequestHandler):
         """ % (smooth_seconds, blob_key) )
 
 
-    def do_mapreduce(self, shards, start_time, end_time, version):
+    def do_mapreduce(self, mr_type, shards, start_time, end_time, version):
         
         self.response.out.write("""<h1>MapReduce launched</h1>""")
         self.response.out.write("""
             <div class='status'>
+            mr_type = %s<br>
             shards = %d<br>
             start_time = %s (%d)<br>
             end_time = %s (%d)<br>
             version = %s<br>
             </div>
-          """ % (shards, human_time(start_time), start_time, human_time(end_time), end_time, version) )
+          """ % (mr_type, shards, human_time(start_time), start_time, human_time(end_time), end_time, version) )
         self.response.out.write("""<a href='/?version=%s'>&lt;&lt;%s</a>""" % (version, version) )
         now_s = time.time()
         start_time = (now_s - 1 * 60 * 60) * 36
         end_time = now_s
 
-        pipeline = MyPipeline(shards, start_time, end_time, version)
+        pipeline = MyPipeline(mr_type, shards, start_time, end_time, version)
         logging.info('************************************************************************************************************************************************')
         logging.info('*************************************************************** pipeline.start() ***************************************************************')
         logging.info('************************************************************************************************************************************************')
@@ -480,13 +494,18 @@ class MainHandler(webapp.RequestHandler):
         except ValueError:
           smooth_seconds = 60
 
-        # shards
+        # seconds_per_shard
         try:
-          shards = long(self.request.get('shards'))
+          seconds_per_shard = long(self.request.get('seconds_per_shard'))
         except ValueError:
-          shards = 10
+          seconds_per_shard = 10
 
-
+        # mr_type
+        try:
+          mr_type = self.request.get('mr_type')
+        except ValueError:
+          mr_type = ""
+        
         #logging.debug("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%DEBUG")
         #logging.info("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%INFO")
         #logging.warning("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%WARNING")
@@ -632,14 +651,26 @@ class MainHandler(webapp.RequestHandler):
           """ % (start_time_str, end_time_str))
  
         self.response.out.write("""
-              Using <input name='shards' value='%d' size='3'> shards<br>
-          """ % shards)
+              Each shard should fetch log records for <input name='seconds_per_shard' value='%d' size='10'> seconds elapsed time<br>
+          """ % seconds_per_shard )
+
+        self.response.out.write("""
+              <label for='mr_type_graph'>
+                <input type='radio' name='mr_type' value='graph' id='mr_type_graph' %s>
+                Create fun graphs
+              </label><br>
+              <label for='mr_type_collect'>
+                <input type='radio' name='mr_type' value='collect' id='mr_type_collect' %s>
+                Collect in Blobstore for later download
+              </label><br>
+          """ % ("checked" if mr_type == 'graph' else "",
+                "checked" if mr_type == 'collect' else "") )
 
         self.response.out.write("""
               <input type='hidden' name='desired_action' value='mapreduce'>
               <span style='color: red'>(CAUTION: this
                 <input type='submit' value='MapReduce' onclick='return confirm("Are you sure?\\n\\nYou must be willing to cleanup the MapReduce manually.")'> 
-              may run "forever" if any given shard is unable to retrieve all it's logs within the request deadline; to cleanup)</span>
+              may run "forever" if any given shard is unable to retrieve all it's logs within the request deadline)</span>
           """)
 
         self.response.out.write("""
@@ -713,7 +744,8 @@ class MainHandler(webapp.RequestHandler):
 
         # --------------- Conditional content ---------------
         if desired_action == "mapreduce":
-          self.do_mapreduce(shards, start_time, end_time, version)
+          shards = math.ceil(float(end_time - start_time) / float(seconds_per_shard))
+          self.do_mapreduce(mr_type, shards, start_time, end_time, version)
         elif desired_action == "grep":
           self.do_grep(version, max_requests, level, start_time, end_time, precision_ms, raw_logs)
         elif desired_action == "visualize":
