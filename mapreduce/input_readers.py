@@ -33,6 +33,7 @@ __all__ = [
     "DatastoreKeyInputReader",
     "Error",
     "InputReader",
+    "LogInputReader",
     "NamespaceInputReader",
     "RecordsReader",
     ]
@@ -43,24 +44,24 @@ import copy
 import StringIO
 import time
 import zipfile
-import logging
 
-from google.appengine.api import datastore
-from google.appengine.api import logservice
-from mapreduce.lib import files
-from mapreduce.lib.files import records
-from google.appengine.datastore import datastore_query
-from google.appengine.datastore import datastore_rpc
-from google.appengine.ext import blobstore
-from google.appengine.ext import db
-from mapreduce.lib import key_range
-from google.appengine.ext.db import metadata
-from mapreduce import context
-from mapreduce import errors
-from mapreduce import model
-from mapreduce import namespace_range
-from mapreduce import operation
-from mapreduce import util
+from google3.apphosting.api import datastore
+from google3.apphosting.api import files
+from google3.apphosting.api import logservice
+from google3.apphosting.api.files import records
+from google3.apphosting.api.logservice import log_service_pb
+from google3.apphosting.datastore import datastore_query
+from google3.apphosting.datastore import datastore_rpc
+from google3.apphosting.ext import blobstore
+from google3.apphosting.ext import db
+from google3.apphosting.ext import key_range
+from google3.apphosting.ext.db import metadata
+from google3.apphosting.ext.mapreduce import context
+from google3.apphosting.ext.mapreduce import errors
+from google3.apphosting.ext.mapreduce import model
+from google3.apphosting.ext.mapreduce import namespace_range
+from google3.apphosting.ext.mapreduce import operation
+from google3.apphosting.ext.mapreduce import util
 
 
 # Classes moved to errors module. Copied here for compatibility.
@@ -1643,7 +1644,7 @@ class RecordsReader(InputReader):
 
 
 class LogInputReader(InputReader):
-  """Reader to read a list of logs via the LogService API.
+  """InputReader for a set of logs via the LogService API.
 
   The number of input shards can be specified by the SHARDS_PARAM mapper
   parameter. Logs cannot be split, so to generate shards, we require the user to
@@ -1651,28 +1652,57 @@ class LogInputReader(InputReader):
   the difference between the starting and ending time may not evenly divide the
   number of shards, they are not guaranteed to operate over an even number of
   logs, merely a roughly even amount of time.
-
-  TODO: Let the user include the other filter parameters in their requests as
-  opposed to just starting time and ending time.
   """
 
   START_TIME_PARAM = "start_time"
   END_TIME_PARAM = "end_time"
-  VERSION_PARAM = "version"
+  MINIMUM_LOG_LEVEL_PARAM = "minimum_log_level"
+  INCLUDE_APP_LOGS_PARAM = "include_app_logs"
+  VERSION_IDS_PARAM = "version_ids"
+  PROTOTYPE_REQUEST_PARAM = "prototype_request"
 
-  def __init__(self, start_time, end_time, version):
+  _PARAMS = frozenset([START_TIME_PARAM, END_TIME_PARAM,
+                       MINIMUM_LOG_LEVEL_PARAM, INCLUDE_APP_LOGS_PARAM,
+                       VERSION_IDS_PARAM, PROTOTYPE_REQUEST_PARAM])
+  _KWARGS = frozenset([PROTOTYPE_REQUEST_PARAM])
+
+  # TODO(user): offset?, include_incomplete?
+
+  def __init__(self,
+               start_time=None,
+               end_time=None,
+               minimum_log_level=None,
+               #include_incomplete=False,
+               include_app_logs=False,
+               version_ids=None,
+               **kwargs):
     """Constructor.
 
     Args:
-      start_time: The earliest time (inclusive), in microseconds since the Unix
-        epoch, that logs should be retrieved for.
-      end_time: The latest time (exclusive), in microseconds since the Unix
-        epoch, that logs should be retrieved for.
-      version: The application version that logs should be retrieved for.
+      start_time: The earliest request completion or last-update time of logs
+        that should be mapped over, in seconds since the Unix epoch.
+      end_time: The latest request completion or last-update time that logs
+        should be mapped over, in seconds since the Unix epoch.
+      minimum_log_level: An application log level which serves as a filter on
+        the requests mapped over--requests with no application log at or above
+        the specified level will be omitted, even if include_app_logs is False.
+      include_app_logs: Whether or not to include application level logs in the
+        mapped logs, as a boolean.  Defaults to False.
+      version_ids: A list of version ids whose logs should be mapped against.
     """
-    self._start_time = start_time
-    self._end_time = end_time
-    self._version = version
+    InputReader.__init__(self)
+    self.__params = dict(kwargs)
+
+    if start_time is not None:
+      self.__params[self.START_TIME_PARAM] = start_time
+    if end_time is not None:
+      self.__params[self.END_TIME_PARAM] = end_time
+    if minimum_log_level is not None:
+      self.__params[self.MINIMUM_LOG_LEVEL_PARAM] = minimum_log_level
+    if include_app_logs is not None:
+      self.__params[self.INCLUDE_APP_LOGS_PARAM] = include_app_logs
+    if version_ids:
+      self.__params[self.VERSION_IDS_PARAM] = version_ids
 
   def __iter__(self):
     """Iterates over logs in a given range of time.
@@ -1680,7 +1710,8 @@ class LogInputReader(InputReader):
     Yields:
       A RequestLog containing all the information for a single request.
     """
-    for log in logservice.fetch(start_time_usec=long(self._start_time), end_time_usec=long(self._end_time), version_ids=[self._version]):
+    for log in logservice.fetch(**self.__params):
+      # TODO(user): Add logic in here to save and restore the offset parameter
       yield log
 
   @classmethod
@@ -1693,7 +1724,12 @@ class LogInputReader(InputReader):
     Returns:
       An instance of the InputReader configured using the given JSON parameters.
     """
-    return cls(json["start_time"], json["end_time"], json["version"])
+    params = json["params"]
+    if cls.PROTOTYPE_REQUEST_PARAM in params:
+      prototype_request = params[cls.PROTOTYPE_REQUEST_PARAM]
+      prototype_request = log_service_pb.LogReadRequest(prototype_request)
+      params[cls.PROTOTYPE_REQUEST_PARAM] = prototype_request
+    return cls(**params)
 
   def to_json(self):
     """Returns an input shard state for the remaining inputs.
@@ -1701,9 +1737,12 @@ class LogInputReader(InputReader):
     Returns:
       A JSON serializable version of the remaining input to read.
     """
-    return {"start_time": self._start_time,
-            "end_time": self._end_time,
-            "version": self._version}
+
+    params = dict(self.__params)
+    if self.PROTOTYPE_REQUEST_PARAM in params:
+      prototype_request = params[self.PROTOTYPE_REQUEST_PARAM]
+      params[self.PROTOTYPE_REQUEST_PARAM] = prototype_request.Encode()
+    return {"params": params}
 
   @classmethod
   def split_input(cls, mapper_spec):
@@ -1715,29 +1754,25 @@ class LogInputReader(InputReader):
     Returns:
       A list of InputReaders.
     """
-    params = mapper_spec.params
+    params = dict(mapper_spec.params)
     shard_count = mapper_spec.shard_count
 
-    global_start_time = params[cls.START_TIME_PARAM]
-    global_end_time = params[cls.END_TIME_PARAM]
-    version = params[cls.VERSION_PARAM]
-    total_time = global_end_time - global_start_time
-    time_per_bucket = total_time / shard_count
+    # Pick out the overall start and end times and time step per shard.
+    start_time = params[cls.START_TIME_PARAM]
+    end_time = params[cls.END_TIME_PARAM]
+    seconds_per_shard = (end_time - start_time) / shard_count
 
-    start_times = []
-    for i in range(shard_count):
-      if i == 0:
-        start_times.append(global_start_time)
-      else:
-        start_times.append(start_times[i-1] + time_per_bucket)
+    # Create a LogInputReader for each shard, modulating the params as we go.
+    shards = []
+    for _ in xrange(shard_count - 1):
+      params[cls.END_TIME_PARAM] = (params[cls.START_TIME_PARAM] +
+                                    seconds_per_shard)
+      shards.append(LogInputReader(**params))
+      params[cls.START_TIME_PARAM] = params[cls.END_TIME_PARAM]
 
-    end_times = []
-    for i in range(shard_count-1):
-      end_times.append(start_times[i+1])
-    end_times.append(global_end_time)
-
-    return [LogInputReader(start_times[i], end_times[i], version)
-            for i in range(shard_count)]
+    # Create a final shard that we're confident will complete the time range.
+    params[cls.END_TIME_PARAM] = end_time
+    return shards + [LogInputReader(**params)]
 
   @classmethod
   def validate(cls, mapper_spec):
@@ -1755,6 +1790,13 @@ class LogInputReader(InputReader):
       raise errors.BadReaderParamsError("Input reader class mismatch")
 
     params = mapper_spec.params
+    params_diff = set(params.keys()) - cls._PARAMS
+    if params_diff:
+      raise errors.BadReaderParamsError("Invalid mapper parameters: %s" %
+                                        ",".join(params_diff))
+    if cls.VERSION_IDS_PARAM not in params:
+      raise errors.BadReaderParamsError("Must specify a list of version ids "
+                                        "for mapper input")
     if cls.START_TIME_PARAM not in params:
       raise errors.BadReaderParamsError("Must specify a starting time for "
                                         "mapper input")
@@ -1762,13 +1804,20 @@ class LogInputReader(InputReader):
       raise errors.BadReaderParamsError("Must specify a ending time for "
                                         "mapper input")
 
-    if params[cls.START_TIME_PARAM] >= params[cls.END_TIME_PARAM]:
-      raise errors.BadReaderParamsError("The starting time cannot be later "
-                                        "than or the same as the ending time.")
+    #if params[cls.START_TIME_PARAM] >= params[cls.END_TIME_PARAM]:
+    #  raise errors.BadReaderParamsError("The starting time cannot be later "
+    #                                    "than or the same as the ending time.")
 
-    if cls.VERSION_PARAM not in params:
-      raise errors.BadReaderParamsError("Must specify a version for "
-                                        "mapper input")
+    # Pass the parameters to logservice.fetch() to verify any underlying
+    # constraints on types or values.  This only constructs an iterator, it
+    # doesn't trigger any requests for actual log records.
+    try:
+      logservice.fetch(**params)
+    except logservice.InvalidArgumentError, e:
+      raise errors.BadReaderParamsError("One or more parameters are not valid "
+                                        "inputs to logservice.fetch(): %s" % e)
 
   def __str__(self):
-    return "%s:%s:%s" % (self._start_time, self._end_time, self._version)
+    # TODO(user): Add offset in here.
+    return "%s/%s %s:%s" % (self._app_id, self._version_id, self._start_time,
+                            self._end_time)
