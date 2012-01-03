@@ -52,7 +52,7 @@ class LogServiceMapReduceResult(db.Expando):
 class MyPipeline(base_handler.PipelineBase):
 
   def run(self, mr_type, shards, start_time, end_time, version):
-    logging.info('*********************************** MyPipeline.run(self, %s, %d, %d, %d, %s)' % (mr_type, shards, start_time, end_time, version) )
+    logging.info('*********************************** MyPipeline.run(self, %s, %d, %f, %f, %s)' % (mr_type, shards, start_time, end_time, version) )
     output = yield mapreduce_pipeline.MapreducePipeline(
         "My MapReduce",
         "main.my_%s_map" % mr_type,
@@ -88,11 +88,11 @@ def my_graph_map(log):
 
   logging.info('--------------------------------------- Map Something ----------------------------------')
   yield(log.start_time, '[1, 0]')
-  logging.info('%d: hit' % log.start_time)
+  logging.info('%f: hit' % log.start_time)
   for t in range(log.start_time, log.end_time + 1):
     if t != log.start_time:
-      logging.info('%d: continued at %d **********************************************************' % (log.start_time, t) )
-      logging.info('log.start_time = %d, log.end_time = %d' % (log.start_time, log.end_time) )
+      logging.info('%f: continued at %f **********************************************************' % (log.start_time, t) )
+      logging.info('log.start_time = %f, log.end_time = %f' % (log.start_time, log.end_time) )
     yield(t, '[0, 1]')
   
 
@@ -115,7 +115,7 @@ class StoreOutput(base_handler.PipelineBase):
 
   def run(self, start_time, end_time, version, blob_keys):
     for blob_key in blob_keys: 
-      logging.info("********************************************** StoreOutput.run(self, blob_key=%s, start_time=%d, end_time=%d, version=%s)" % (blob_key, start_time, end_time, version) )
+      logging.info("********************************************** StoreOutput.run(self, blob_key=%s, start_time=%f, end_time=%f, version=%s)" % (blob_key, start_time, end_time, version) )
       result = LogServiceMapReduceResult(blob_key=blob_key, start_time=start_time, end_time=end_time, version=version)
       db.put(result)
 
@@ -137,39 +137,51 @@ class DownloadHandler(blobstore_handlers.BlobstoreDownloadHandler):
 
 class MainHandler(webapp.RequestHandler):
 
+
+    def out(self, msg):
+
+       if not self.batch:
+         self.response.out.write(msg)
+
+
+    def batch_out(self, msg):
+
+       self.response.out.write(msg)
+
+
     def show_latency(self, precision_ms, latency, resource, name, comment):
 
-        self.response.out.write("""<h1>Latency - %s</h1>""" % name)
-        self.response.out.write("""<div class='comment'>%s</div>""" % comment)
+        self.out("""<h1>Latency - %s</h1>""" % name)
+        self.out("""<div class='comment'>%s</div>""" % comment)
         if len(latency) == 0:
-          self.response.out.write('No logs')
+          self.out('No logs')
           return
 
         scale = min(1, float(MAX_LATENCY_WIDTH) / max(latency.values()))
-        self.response.out.write("""<pre>""")
+        self.out("""<pre>""")
         for k in range(0, max(latency) + 1 ):
           cnt = latency.get(k, 0)
-          self.response.out.write('%6d requests: [%5d - %5d ms]: %s<br>' % (cnt, k * precision_ms, (k+1) * precision_ms -1, '*' * int(scale * cnt)) )
-        self.response.out.write('</pre>')
+          self.out('%6d requests: [%5d - %5d ms]: %s<br>' % (cnt, k * precision_ms, (k+1) * precision_ms -1, '*' * int(scale * cnt)) )
+        self.out('</pre>')
 
-        self.response.out.write("""<pre>""")
+        self.out("""<pre>""")
         for res in sorted(resource, key=resource.get, reverse=True):
-          self.response.out.write("""%6d requests: %s<br>""" % (resource[res], res) )
-        self.response.out.write("""</pre>""")
+          self.out("""%6d requests: %s<br>""" % (resource[res], res) )
+        self.out("""</pre>""")
 
 
     def do_visualize(self, blob_key, smooth_seconds):
 
         # --------------- MapReduce results ---------------
-        self.response.out.write("""<h1>MapReduce results</h1>""")
+        self.out("""<h1>MapReduce results</h1>""")
 
-        self.response.out.write("""
+        self.out("""
           <div id='status' class='status'>Initializing visualization...</div>
           <div id="visualization" style="stlye: visibility: hidden; width: 500px; height: 400px; border: 1px solid gray;">visualization</div>
           <pre id="blob_data"></pre>
         """)
 
-        self.response.out.write(r"""
+        self.out(r"""
               <script type="text/javascript" src="https://www.google.com/jsapi"></script>
               <script type="text/javascript">
                 google.load('visualization', '1', {packages: ['corechart']});
@@ -304,17 +316,17 @@ class MainHandler(webapp.RequestHandler):
 
     def do_mapreduce(self, mr_type, shards, start_time, end_time, version):
         
-        self.response.out.write("""<h1>MapReduce launched</h1>""")
-        self.response.out.write("""
+        self.out("""<h1>MapReduce launched</h1>""")
+        self.out("""
             <div class='status'>
             mr_type = %s<br>
             shards = %d<br>
-            start_time = %s (%d)<br>
-            end_time = %s (%d)<br>
+            start_time = %s (%f)<br>
+            end_time = %s (%f)<br>
             version = %s<br>
             </div>
           """ % (mr_type, shards, human_time(start_time), start_time, human_time(end_time), end_time, version) )
-        self.response.out.write("""<a href='/?version=%s'>&lt;&lt;%s</a>""" % (version, version) )
+        self.out("""<a href='/?version=%s'>&lt;&lt;%s</a>""" % (version, version) )
         now_s = time.time()
         start_time = (now_s - 1 * 60 * 60) * 36
         end_time = now_s
@@ -345,16 +357,16 @@ class MainHandler(webapp.RequestHandler):
         version_ids=[version]
         include_incomplete=False
 
-        self.response.out.write("""<h1>logservice.fetch() parameters</h1>""")
-        self.response.out.write("""<pre>""")
-        self.response.out.write("""start_time: %d (%s)\n""" % (start_time, human_time(start_time)) )
-        self.response.out.write("""end_time: %d (%s)\n""" % (end_time, human_time(end_time)) )
+        self.out("""<h1>logservice.fetch() parameters</h1>""")
+        self.out("""<pre>""")
+        self.out("""start_time: %f (%s)\n""" % (start_time, human_time(start_time)) )
+        self.out("""end_time: %f (%s)\n""" % (end_time, human_time(end_time)) )
         level_str = LEVEL[level] if level is not None else 'None'
-        self.response.out.write("""minimum_log_level: %s (%s)\n""" % (pprint.pformat(level), level_str) )
-        self.response.out.write("""include_app_logs: %s\n""" % include_app_logs )
-        self.response.out.write("""include_incomplete: %s\n""" % include_incomplete )
-        self.response.out.write("""version_ids: %s\n""" % version_ids )
-        self.response.out.write("""</pre>""")
+        self.out("""minimum_log_level: %s (%s)\n""" % (pprint.pformat(level), level_str) )
+        self.out("""include_app_logs: %s\n""" % include_app_logs )
+        self.out("""include_incomplete: %s\n""" % include_incomplete )
+        self.out("""version_ids: %s\n""" % version_ids )
+        self.out("""</pre>""")
         logging.info("fetch(start_time=%s, end_time=%s, ...)" % (start_time, end_time) )
         logs = logservice.fetch(start_time=start_time,
                                     end_time=end_time,
@@ -363,30 +375,39 @@ class MainHandler(webapp.RequestHandler):
                                     include_incomplete=include_incomplete,
                                     version_ids=version_ids,
                                    )
-        if raw_logs:
-          self.response.out.write("""<h1>Raw logs</h1>""")
+        if raw_logs == 'pretty':
+          self.out("""<h1>Raw logs</h1>""")
+        if raw_logs == 'download':
+          self.response.headers['Content-Type'] = 'text/plain'
  
         count = 0
         for log in logs:
-          #self.response.out.write('%s<br>' % log)
+          #self.out('%s<br>' % log)
 
-          if raw_logs:
+          if raw_logs == 'pretty':
             data = record_to_dict(log)
             del data['app_logs']
             data = pprint.pformat(data)
             data = cgi.escape(data)
-            self.response.out.write('<hr><pre>%s</pre><br>' % data)
+            self.out('<hr><pre>%s</pre><br>\n' % data)
+          if raw_logs == 'download':
+            self.batch_out('%s\n' % log.combined )
 
           for line in log.app_logs:
             safe_msg = pprint.pformat(line.message) # message may include binary data
             msg = "[%s] %s" % ( LEVEL[line.level], safe_msg )
-            #self.response.out.write('[%s][%s] %s<br>' % (time.strftime('%Y-%m-%d %H:%M:%S %Z', time.localtime(line.time)), line.level, cgi.escape( safe_msg )) )
+            #self.out('[%s][%s] %s<br>' % (time.strftime('%Y-%m-%d %H:%M:%S %Z', time.localtime(line.time)), line.level, cgi.escape( safe_msg )) )
             messages[msg] = messages.get(msg, 0) + 1
-            if raw_logs:
+            if raw_logs == 'pretty':
               data = record_to_dict(line)
               data = pprint.pformat(data)
               data = cgi.escape(data)
-              self.response.out.write("""%s<pre class='errmsg'>%s</pre><br>""" % (pretty_level(line.level), data))
+              self.out("""%s<pre class='errmsg'>%s</pre><br>""" % (pretty_level(line.level), data))
+            if raw_logs == 'download':
+              t = '%d:%f %s' % (line.level, line.time, line.message)
+              t = t.replace("\n", "\n: ") + "\n"
+              for l in t.splitlines(True):
+                self.batch_out("\t%s" % l)
 
           res = """[%s] %s""" % (log.status, log.resource)
           index = int( (log.latency - log.pending_time) * 1000 / precision_ms) 
@@ -413,16 +434,16 @@ class MainHandler(webapp.RequestHandler):
           if count == max_requests:
             break
 
-        self.response.out.write("""<h1>Summary</h1>""")
-        self.response.out.write("""<pre>""")
-        self.response.out.write("""Rows retrieved: %d\n""" % count)
-        self.response.out.write("""</pre>""")
+        self.out("""<h1>Summary</h1>""")
+        self.out("""<pre>""")
+        self.out("""Rows retrieved: %d\n""" % count)
+        self.out("""</pre>""")
 
-        if raw_logs:
-          self.response.out.write('<hr>')
+        if raw_logs == 'pretty':
+          self.out('<hr>')
 
         if count == 0:
-          self.response.out.write("""
+          self.out("""
             No logs.
             """)
           return
@@ -435,14 +456,14 @@ class MainHandler(webapp.RequestHandler):
         self.show_latency(precision_ms, latency_pending, resource_pending, 'Pending Time',     'log.pending_time > 0')
 
         # --------------- Errors ---------------
-        self.response.out.write("""<h1>Log message frequency</h1>""")
+        self.out("""<h1>Log message frequency</h1>""")
         if len(messages) == 0:
-          self.response.out.write("""
+          self.out("""
             No messages.
             """)
         else:
           for msg in sorted(messages, key=messages.get, reverse=True):
-            self.response.out.write("""
+            self.out("""
               Count: <b>%d</b><br>
               <pre class='errmsg'>%s</pre><br>
               """ % (messages[msg], cgi.escape(msg)) )
@@ -474,6 +495,7 @@ class MainHandler(webapp.RequestHandler):
 
         # raw_logs
         raw_logs = self.request.get('raw_logs')
+        self.batch = raw_logs == 'download'
 
         # start_time
         try:
@@ -525,7 +547,7 @@ class MainHandler(webapp.RequestHandler):
 
 
         # --------------- HTML Page ---------------
-        self.response.out.write("""
+        self.out("""
           <html>
             <head>
               <title>Logservice %s</title>
@@ -593,7 +615,7 @@ class MainHandler(webapp.RequestHandler):
 
         # --------------- TITLE ---------------
         user = users.get_current_user();
-        self.response.out.write("""
+        self.out("""
             <div style='float: right;'>git: <a href='http://code.google.com/p/sauer/source/browse/?repo=logservice' target='_blank'>http://code.google.com/p/sauer.logservice/</a><br>%s</div>
             <div>
               <a href="/?version=%s">&lt;&lt; %s</a>&nbsp;&nbsp;
@@ -601,7 +623,7 @@ class MainHandler(webapp.RequestHandler):
             </div>
           """ % (user.nickname(), version, version) )
         # --------------- 1st FORM ---------------
-        self.response.out.write("""
+        self.out("""
           <fieldset>
             <legend>Logs Filter</legend>
             <form action='/'>
@@ -617,55 +639,66 @@ class MainHandler(webapp.RequestHandler):
             selected = 'selected'
           else:
             selected = ''
-          self.response.out.write("""<option value='%s' %s>%s</option>""" % (k, selected, v) )
+          self.out("""<option value='%s' %s>%s</option>""" % (k, selected, v) )
 
-        if raw_logs:
-          checked = 'checked'
-        else:
-          checked = ''
-        self.response.out.write("""
+        self.out("""
               </select> or above<br>
           """)
  
         start_time_str = human_time(start_time)
         end_time_str = human_time(end_time)
-        self.response.out.write("""
+        self.out("""
              Only include requests between <input name='start_time_str' value='%s' size='20'>
              and <input name='end_time_str' value='%s' size='20'><br>
           """ % (start_time_str, end_time_str))
  
-        self.response.out.write("""
+        self.out("""
               Histogram precision: <input name='precision_ms' value='%s' size='5'>ms<br>
           """ % precision_ms)
 
-        self.response.out.write("""
-              <input type='checkbox' name='raw_logs' %s> Pretty print raw logs<br>
+        self.out("""
+              <label for='raw_logs_none'>
+                <input type='radio' name='raw_logs' value='' id='raw_logs_none' %s>
+                Summarize only
+              </label><br>
+              <label for='raw_logs_pretty'>
+                <input type='radio' name='raw_logs' value='pretty' id='raw_logs_pretty' %s>
+                Pretty print raw logs
+              </label><br>
+              <label for='raw_logs_download'>
+                <input type='radio' name='raw_logs' value='download' id='raw_logs_download' %s>
+                Download raw logs
+              </label><br>
+          """ % ("checked" if raw_logs == '' else "",
+                "checked" if raw_logs == 'pretty' else "",
+                "checked" if raw_logs == 'download' else "") )
 
+        self.out("""
               <input type='hidden' name='desired_action' value='grep'>
               <input type='submit' value='Summarize'>
 
             </form>
           </fieldset>
-          """ % checked)
+          """)
 
         # --------------- 2nd FORM ---------------
-        self.response.out.write("""
+        self.out("""
           <fieldset>
             <legend>Logs MapReduce</legend>
             <form action='/'>
               Application version: <input name='version' value='%s' size='20'><br>
         """ % version)
 
-        self.response.out.write("""
+        self.out("""
              Only include requests between <input name='start_time_str' value='%s' size='20'>
              and <input name='end_time_str' value='%s' size='20'><br>
           """ % (start_time_str, end_time_str))
  
-        self.response.out.write("""
+        self.out("""
               Each shard should fetch log records for <input name='seconds_per_shard' value='%d' size='10'> seconds elapsed time<br>
           """ % seconds_per_shard )
 
-        self.response.out.write("""
+        self.out("""
               <label for='mr_type_graph'>
                 <input type='radio' name='mr_type' value='graph' id='mr_type_graph' %s>
                 Create fun graphs
@@ -677,27 +710,27 @@ class MainHandler(webapp.RequestHandler):
           """ % ("checked" if mr_type == 'graph' else "",
                 "checked" if mr_type == 'collect' else "") )
 
-        self.response.out.write("""
+        self.out("""
               <input type='hidden' name='desired_action' value='mapreduce'>
               <span style='color: red'>(CAUTION: this
                 <input type='submit' value='MapReduce' onclick='return confirm("Are you sure?\\n\\nYou must be willing to cleanup the MapReduce manually.")'> 
               may run "forever" if any given shard is unable to retrieve all it's logs within the request deadline)</span>
           """)
 
-        self.response.out.write("""
+        self.out("""
             </form>
           </fieldset>
           """)
 
         results = db.Query(LogServiceMapReduceResult).order('-end_time').fetch(limit=10)
         if results:
-          self.response.out.write("""
+          self.out("""
             <fieldset>
               <legend>Visualize MapReduce results</legend>
               <form action='/' name='visualize_map_reduce_form'>
             """)
 
-          self.response.out.write("""
+          self.out("""
                 <input type='hidden' name='blob_key' value='%s'>
                 <input type='hidden' name='version'>
                 <script>
@@ -718,7 +751,7 @@ class MainHandler(webapp.RequestHandler):
                 </script>
             """ % blob_key)
 
-          self.response.out.write("""
+          self.out("""
                 Smooth results over <input name='smooth_seconds' value='%s' size='10'> (&#8592;
             """ % smooth_seconds)
           for s in [1, 10, 60, 300, 600, 3600]:
@@ -726,8 +759,8 @@ class MainHandler(webapp.RequestHandler):
               selected = "selected"
             else:
               selected = ""
-            self.response.out.write("""<input type='button' value='%d' onClick='set_smooth_seconds(this.value);' class='%s'>""" % (s, selected) )
-          self.response.out.write(""") seconds<br>""")
+            self.out("""<input type='button' value='%d' onClick='set_smooth_seconds(this.value);' class='%s'>""" % (s, selected) )
+          self.out(""") seconds<br>""")
 
           for result in results:
             key = result.blob_key
@@ -736,7 +769,7 @@ class MainHandler(webapp.RequestHandler):
               css_class = "selected"
             else:
               css_class = ""
-            self.response.out.write("""
+            self.out("""
               <div class='%s'>
                 <input type=button onClick='visualize_map_reduce("%s", "%s")' value='visualize'>
                  start_time=%s, end_time=%s, version=%s
@@ -745,9 +778,9 @@ class MainHandler(webapp.RequestHandler):
                            human_time(result.start_time), human_time(result.end_time), v) )
             if key == blob_key:
               t = pprint.pformat(db.to_dict(result))
-              self.response.out.write("""<pre class='small'>%s</pre>""" % t)
+              self.out("""<pre class='small'>%s</pre>""" % t)
 
-          self.response.out.write("""
+          self.out("""
                 <input type='hidden' name='desired_action' value='visualize'>
               </form>
             </fieldset>
@@ -763,7 +796,7 @@ class MainHandler(webapp.RequestHandler):
           self.do_visualize(blob_key, smooth_seconds)
 
         # --------------- End of page ---------------
-        self.response.out.write("""
+        self.out("""
             </body>
           </html>
           """)
