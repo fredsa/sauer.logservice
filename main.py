@@ -328,10 +328,6 @@ class MainHandler(webapp.RequestHandler):
 
     def do_grep(self, version, max_requests, level, start_time, end_time, precision_ms, raw_logs):
 
-        # --------------- Raw logs ---------------
-        if raw_logs:
-          self.response.out.write("""<h1>Raw logs</h1>""")
- 
         latency_errors={}
         latency_cached={}
         latency_static={}
@@ -345,19 +341,35 @@ class MainHandler(webapp.RequestHandler):
         resource_pending={}
 
         messages={}
-        count = 0
+        include_app_logs=True
+        version_ids=[version]
+        include_incomplete=False
+
+        self.response.out.write("""<h1>logservice.fetch() parameters</h1>""")
+        self.response.out.write("""<pre>""")
+        self.response.out.write("""start_time: %d (%s)\n""" % (start_time, human_time(start_time)) )
+        self.response.out.write("""end_time: %d (%s)\n""" % (end_time, human_time(end_time)) )
+        level_str = LEVEL[level] if level is not None else 'None'
+        self.response.out.write("""minimum_log_level: %s (%s)\n""" % (pprint.pformat(level), level_str) )
+        self.response.out.write("""include_app_logs: %s\n""" % include_app_logs )
+        self.response.out.write("""include_incomplete: %s\n""" % include_incomplete )
+        self.response.out.write("""version_ids: %s\n""" % version_ids )
+        self.response.out.write("""</pre>""")
         logging.info("fetch(start_time=%s, end_time=%s, ...)" % (start_time, end_time) )
         logs = logservice.fetch(start_time=start_time,
                                     end_time=end_time,
                                     minimum_log_level=level,
-                                    include_app_logs=True,
-                                    #include_incomplete=True,
-                                    version_ids=[version]
+                                    include_app_logs=include_app_logs,
+                                    include_incomplete=include_incomplete,
+                                    version_ids=version_ids,
                                    )
+        if raw_logs:
+          self.response.out.write("""<h1>Raw logs</h1>""")
+ 
+        count = 0
         for log in logs:
           #self.response.out.write('%s<br>' % log)
 
-          # --------------- Raw logs ---------------
           if raw_logs:
             data = record_to_dict(log)
             del data['app_logs']
@@ -370,7 +382,6 @@ class MainHandler(webapp.RequestHandler):
             msg = "[%s] %s" % ( LEVEL[line.level], safe_msg )
             #self.response.out.write('[%s][%s] %s<br>' % (time.strftime('%Y-%m-%d %H:%M:%S %Z', time.localtime(line.time)), line.level, cgi.escape( safe_msg )) )
             messages[msg] = messages.get(msg, 0) + 1
-            # --------------- Raw logs ---------------
             if raw_logs:
               data = record_to_dict(line)
               data = pprint.pformat(data)
