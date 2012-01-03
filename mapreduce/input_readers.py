@@ -45,23 +45,23 @@ import StringIO
 import time
 import zipfile
 
-from google3.apphosting.api import datastore
-from google3.apphosting.api import files
-from google3.apphosting.api import logservice
-from google3.apphosting.api.files import records
-from google3.apphosting.api.logservice import log_service_pb
-from google3.apphosting.datastore import datastore_query
-from google3.apphosting.datastore import datastore_rpc
-from google3.apphosting.ext import blobstore
-from google3.apphosting.ext import db
-from google3.apphosting.ext import key_range
-from google3.apphosting.ext.db import metadata
-from google3.apphosting.ext.mapreduce import context
-from google3.apphosting.ext.mapreduce import errors
-from google3.apphosting.ext.mapreduce import model
-from google3.apphosting.ext.mapreduce import namespace_range
-from google3.apphosting.ext.mapreduce import operation
-from google3.apphosting.ext.mapreduce import util
+from google.appengine.api import datastore
+from google.appengine.api import files
+from google.appengine.api import logservice
+from google.appengine.api.files import records
+from google.appengine.api.logservice import log_service_pb
+from google.appengine.datastore import datastore_query
+from google.appengine.datastore import datastore_rpc
+from google.appengine.ext import blobstore
+from google.appengine.ext import db
+from google.appengine.ext import key_range
+from google.appengine.ext.db import metadata
+from google.appengine.ext.mapreduce import context
+from google.appengine.ext.mapreduce import errors
+from google.appengine.ext.mapreduce import model
+from google.appengine.ext.mapreduce import namespace_range
+from google.appengine.ext.mapreduce import operation
+from google.appengine.ext.mapreduce import util
 
 
 # Classes moved to errors module. Copied here for compatibility.
