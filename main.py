@@ -74,7 +74,7 @@ def my_collect_map(log):
   """My map function."""
 
   logging.info('--------------------------------------- Map Something ----------------------------------')
-  yield(log.combined, '')
+  yield("%s\n" % log.combined, '')
   
 
 def my_collect_reduce(key, values):
