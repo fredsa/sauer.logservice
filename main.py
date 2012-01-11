@@ -326,9 +326,6 @@ class MainHandler(webapp.RequestHandler):
             </div>
           """ % (mr_type, shards, human_time(start_time), start_time, human_time(end_time), end_time, version) )
         self.out("""<a href='/?version=%s'>&lt;&lt;%s</a>""" % (version, version) )
-        now_s = time.time()
-        start_time = (now_s - 1 * 60 * 60) * 36
-        end_time = now_s
 
         pipeline = MyPipeline(mr_type, shards, start_time, end_time, version)
         logging.info('************************************************************************************************************************************************')
