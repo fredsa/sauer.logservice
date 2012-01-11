@@ -44,6 +44,8 @@ import copy
 import StringIO
 import time
 import zipfile
+import logging
+import pprint
 
 from google.appengine.api import datastore
 from google.appengine.api import files
@@ -1660,8 +1662,9 @@ class LogInputReader(InputReader):
   INCLUDE_APP_LOGS_PARAM = "include_app_logs"
   VERSION_IDS_PARAM = "version_ids"
   PROTOTYPE_REQUEST_PARAM = "prototype_request"
+  OFFSET = "offset"
 
-  _PARAMS = frozenset([START_TIME_PARAM, END_TIME_PARAM,
+  _PARAMS = frozenset([START_TIME_PARAM, END_TIME_PARAM, OFFSET,
                        MINIMUM_LOG_LEVEL_PARAM, INCLUDE_APP_LOGS_PARAM,
                        VERSION_IDS_PARAM, PROTOTYPE_REQUEST_PARAM])
   _KWARGS = frozenset([PROTOTYPE_REQUEST_PARAM])
@@ -1704,14 +1707,19 @@ class LogInputReader(InputReader):
     if version_ids:
       self.__params[self.VERSION_IDS_PARAM] = version_ids
 
+    self.__params[self.OFFSET] = None
+
   def __iter__(self):
     """Iterates over logs in a given range of time.
 
     Yields:
       A RequestLog containing all the information for a single request.
     """
+    logging.info("__iter__ called with self.__params[self.OFFSET] = %s" % self.__params[self.OFFSET] )
+    logging.info("******************** for log in logservice.fetch(self.__params = %s)" % pprint.pformat(self.__params) )
     for log in logservice.fetch(**self.__params):
-      # TODO(user): Add logic in here to save and restore the offset parameter
+      logging.info("******************* yield(self.__params[self.OFFSET] = %s)" % log )
+      self.__params[self.OFFSET] = log
       yield log
 
   @classmethod
