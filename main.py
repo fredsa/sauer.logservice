@@ -363,14 +363,16 @@ class MainHandler(webapp.RequestHandler):
         self.out("""include_incomplete: %s\n""" % include_incomplete )
         self.out("""version_ids: %s\n""" % version_ids )
         self.out("""</pre>""")
-        logging.info("fetch(start_time=%s, end_time=%s, ...)" % (start_time, end_time) )
+        logging.info("fetch(start_time=%f, end_time=%f, minimum_log_level=%s, include_app_logs=%s, include_incomplete=%s, version_ids=%s)" % (start_time, end_time, level, include_app_logs, include_incomplete, version_ids) )
         logs = logservice.fetch(start_time=start_time,
-                                    end_time=end_time,
-                                    minimum_log_level=level,
-                                    include_app_logs=include_app_logs,
-                                    include_incomplete=include_incomplete,
-                                    version_ids=version_ids,
-                                   )
+                                end_time=end_time,
+                                minimum_log_level=level,
+                                include_app_logs=include_app_logs,
+                                include_incomplete=include_incomplete,
+                                version_ids=version_ids,
+			)
+
+
         if raw_logs == 'pretty':
           self.out("""<h1>Raw logs</h1>""")
         if raw_logs == 'download':
@@ -769,9 +771,11 @@ class MainHandler(webapp.RequestHandler):
               <div class='%s'>
                 <input type=button onClick='visualize_map_reduce("%s", "%s")' value='visualize'>
                  start_time=%s, end_time=%s, version=%s
+                 <a style='font-size: 0.6em; padding-left: 1em;' href='%s' _target='_blank'>%s</a>
               </div>""" % (css_class,
                            v, key,
-                           human_time(result.start_time), human_time(result.end_time), v) )
+                           human_time(result.start_time), human_time(result.end_time), v,
+                           blob_key, blob_key) )
             if key == blob_key:
               t = pprint.pformat(db.to_dict(result))
               self.out("""<pre class='small'>%s</pre>""" % t)
@@ -784,7 +788,7 @@ class MainHandler(webapp.RequestHandler):
 
         # --------------- Conditional content ---------------
         if desired_action == "mapreduce":
-          shards = math.ceil(float(end_time - start_time) / float(seconds_per_shard))
+          shards = int(math.ceil(float(end_time - start_time) / float(seconds_per_shard)))
           self.do_mapreduce(mr_type, shards, start_time, end_time, version)
         elif desired_action == "grep":
           self.do_grep(version, max_requests, level, start_time, end_time, precision_ms, raw_logs)
