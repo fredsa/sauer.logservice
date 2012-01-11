@@ -775,7 +775,7 @@ class MainHandler(webapp.RequestHandler):
               </div>""" % (css_class,
                            v, key,
                            human_time(result.start_time), human_time(result.end_time), v,
-                           blob_key, blob_key) )
+                           key, key) )
             if key == blob_key:
               t = pprint.pformat(db.to_dict(result))
               self.out("""<pre class='small'>%s</pre>""" % t)
