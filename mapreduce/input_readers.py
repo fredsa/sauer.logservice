@@ -1817,7 +1817,7 @@ class LogInputReader(InputReader):
       raise errors.BadReaderParamsError("One or more parameters are not valid "
                                         "inputs to logservice.fetch(): %s" % e)
 
-  def __str__(self):
-    # TODO(user): Add offset in here.
-    return "%s/%s %s:%s" % (self._app_id, self._version_id, self._start_time,
-                            self._end_time)
+  #def __str__(self):
+  #  # TODO(user): Add offset in here.
+  #  return "%s/%s %s:%s" % (self._app_id, self._version_id, self._start_time,
+  #                          self._end_time)
