@@ -48,6 +48,7 @@ import logging
 import pprint
 
 from google.appengine.api import datastore
+from google.appengine.api import logservice
 from mapreduce.lib import files
 from mapreduce.lib.files import records
 from google.appengine.datastore import datastore_query
