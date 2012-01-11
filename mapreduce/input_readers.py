@@ -48,22 +48,20 @@ import logging
 import pprint
 
 from google.appengine.api import datastore
-from google.appengine.api import files
-from google.appengine.api import logservice
-from google.appengine.api.files import records
-from google.appengine.api.logservice import log_service_pb
+from mapreduce.lib import files
+from mapreduce.lib.files import records
 from google.appengine.datastore import datastore_query
 from google.appengine.datastore import datastore_rpc
 from google.appengine.ext import blobstore
 from google.appengine.ext import db
-from google.appengine.ext import key_range
+from mapreduce.lib import key_range
 from google.appengine.ext.db import metadata
-from google.appengine.ext.mapreduce import context
-from google.appengine.ext.mapreduce import errors
-from google.appengine.ext.mapreduce import model
-from google.appengine.ext.mapreduce import namespace_range
-from google.appengine.ext.mapreduce import operation
-from google.appengine.ext.mapreduce import util
+from mapreduce import context
+from mapreduce import errors
+from mapreduce import model
+from mapreduce import namespace_range
+from mapreduce import operation
+from mapreduce import util
 
 
 # Classes moved to errors module. Copied here for compatibility.
