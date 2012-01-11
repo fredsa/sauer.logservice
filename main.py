@@ -62,7 +62,7 @@ class MyPipeline(base_handler.PipelineBase):
         mapper_params={
             "start_time": start_time,
             "end_time": end_time,
-            "version": version,
+            "version_ids": [version],
         },
         reducer_params={
             "mime_type": "text/plain",
