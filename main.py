@@ -710,9 +710,7 @@ class MainHandler(webapp.RequestHandler):
 
         self.out("""
               <input type='hidden' name='desired_action' value='mapreduce'>
-              <span style='color: red'>(CAUTION: this
-                <input type='submit' value='MapReduce' onclick='return confirm("Are you sure?\\n\\nYou must be willing to cleanup the MapReduce manually.")'> 
-              may run "forever" if any given shard is unable to retrieve all it's logs within the request deadline)</span>
+              <input type='submit' value='MapReduce' onclick='return document.getElementById("mr_type_collect").checked || document.getElementById("mr_type_graph").checked;'> 
           """)
 
         self.out("""
