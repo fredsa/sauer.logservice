@@ -336,22 +336,22 @@ class MainHandler(webapp.RequestHandler):
 
     def do_grep(self, version, max_requests, level, start_time, end_time, precision_ms, raw_logs):
 
-        latency_errors={}
-        latency_cached={}
-        latency_static={}
-        latency_dynamic={}
-        latency_pending={}
+        latency_errors = {}
+        latency_cached = {}
+        latency_static = {}
+        latency_dynamic = {}
+        latency_pending = {}
 
-        resource_errors={}
-        resource_cached={}
-        resource_static={}
-        resource_dynamic={}
-        resource_pending={}
+        resource_errors = {}
+        resource_cached = {}
+        resource_static = {}
+        resource_dynamic = {}
+        resource_pending = {}
 
-        messages={}
-        include_app_logs=True
-        version_ids=[version]
-        include_incomplete=False
+        messages = {}
+        include_app_logs = raw_logs == 'pretty' or raw_logs == 'download'
+        version_ids = [version]
+        include_incomplete = False
 
         self.out("""<h1>logservice.fetch() parameters</h1>""")
         self.out("""<pre>""")
