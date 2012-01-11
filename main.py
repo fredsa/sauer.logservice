@@ -282,8 +282,7 @@ class MainHandler(webapp.RequestHandler):
                     }
 
                     data.addRow([
-                      new Date(ts * 
-),
+                      new Date(ts),
                       parseInt(totals[0]) / smooth_seconds,
                       parseInt(totals[1]) / smooth_seconds,
                     ]);
