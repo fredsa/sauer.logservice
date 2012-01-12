@@ -1717,8 +1717,8 @@ class LogInputReader(InputReader):
     logging.info("__iter__ called with self.__params[self.OFFSET] = %s" % self.__params[self.OFFSET] )
     logging.info("******************** for log in logservice.fetch(self.__params = %s)" % pprint.pformat(self.__params) )
     for log in logservice.fetch(**self.__params):
-      logging.info("******************* yield(self.__params[self.OFFSET] = %s)" % log )
-      self.__params[self.OFFSET] = log
+      logging.info("******************* yield(self.__params[self.OFFSET] = %s)" % pprint.pformat(log.offset) )
+      self.__params[self.OFFSET] = log.offset
       yield log
 
   @classmethod
