@@ -1,0 +1,5 @@
+mapreduce:
+- name: dummy
+  mapper:
+    input_reader: dummy
+    handler: dummy
