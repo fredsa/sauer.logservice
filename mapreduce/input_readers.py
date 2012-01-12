@@ -81,6 +81,9 @@ COUNTER_IO_READ_MSEC = "io-read-msec"
 # to yield an actual value to the handler.
 ALLOW_CHECKPOINT = object()
 
+def fix_kwargs(p):
+    "Fix dict so that keywords are strings rather than unicode"
+    return dict((str(k), p[k]) for k in p.keys())
 
 class InputReader(model.JsonMixin):
   """Abstract base class for input readers.
@@ -1693,7 +1696,8 @@ class LogInputReader(InputReader):
       version_ids: A list of version ids whose logs should be mapped against.
     """
     InputReader.__init__(self)
-    self.__params = dict(kwargs)
+    #self.__params = dict(kwargs)
+    self.__params = {}
 
     if start_time is not None:
       self.__params[self.START_TIME_PARAM] = start_time
@@ -1716,7 +1720,7 @@ class LogInputReader(InputReader):
     """
     logging.info("__iter__ called with self.__params[self.OFFSET] = %s" % self.__params[self.OFFSET] )
     logging.info("******************** for log in logservice.fetch(self.__params = %s)" % pprint.pformat(self.__params) )
-    for log in logservice.fetch(**self.__params):
+    for log in logservice.fetch(**fix_kwargs(self.__params)):
       logging.info("******************* yield(self.__params[self.OFFSET] = %s)" % pprint.pformat(log.offset) )
       self.__params[self.OFFSET] = log.offset
       yield log
@@ -1736,7 +1740,7 @@ class LogInputReader(InputReader):
       prototype_request = params[cls.PROTOTYPE_REQUEST_PARAM]
       prototype_request = log_service_pb.LogReadRequest(prototype_request)
       params[cls.PROTOTYPE_REQUEST_PARAM] = prototype_request
-    return cls(**params)
+    return cls(**fix_kwargs(params))
 
   def to_json(self):
     """Returns an input shard state for the remaining inputs.
@@ -1774,12 +1778,12 @@ class LogInputReader(InputReader):
     for _ in xrange(shard_count - 1):
       params[cls.END_TIME_PARAM] = (params[cls.START_TIME_PARAM] +
                                     seconds_per_shard)
-      shards.append(LogInputReader(**params))
+      shards.append(LogInputReader(**fix_kwargs(params)))
       params[cls.START_TIME_PARAM] = params[cls.END_TIME_PARAM]
 
     # Create a final shard that we're confident will complete the time range.
     params[cls.END_TIME_PARAM] = end_time
-    return shards + [LogInputReader(**params)]
+    return shards + [LogInputReader(**fix_kwargs(params))]
 
   @classmethod
   def validate(cls, mapper_spec):
@@ -1819,7 +1823,7 @@ class LogInputReader(InputReader):
     # constraints on types or values.  This only constructs an iterator, it
     # doesn't trigger any requests for actual log records.
     try:
-      logservice.fetch(**params)
+      logservice.fetch(**fix_kwargs(params))
     except logservice.InvalidArgumentError, e:
       raise errors.BadReaderParamsError("One or more parameters are not valid "
                                         "inputs to logservice.fetch(): %s" % e)
