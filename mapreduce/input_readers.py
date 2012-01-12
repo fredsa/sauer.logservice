@@ -1716,13 +1716,7 @@ class LogInputReader(InputReader):
     """
     logging.info("__iter__ called with self.__params[self.OFFSET] = %s" % self.__params[self.OFFSET] )
     logging.info("******************** for log in logservice.fetch(self.__params = %s)" % pprint.pformat(self.__params) )
-    for log in logservice.fetch(start_time=self.__params[self.START_TIME_PARAM],
-               end_time=self.__params[self.END_TIME_PARAM],
-               minimum_log_level=self.__params.get(self.MINIMUM_LOG_LEVEL_PARAM, None),
-               #include_incomplete=self.__params[self.INCLUDE_INCOMPLETE_PARAM],
-               include_app_logs=self.__params[self.INCLUDE_APP_LOGS_PARAM],
-               version_ids=self.__params[self.VERSION_IDS_PARAM],
-               ):
+    for log in logservice.fetch(**self.__params):
       logging.info("******************* yield(self.__params[self.OFFSET] = %s)" % log )
       self.__params[self.OFFSET] = log
       yield log
