@@ -89,12 +89,14 @@ def my_graph_map(log):
   logging.info('--------------------------------------- Map Something ----------------------------------')
   yield(log.start_time, '[1, 0]')
   logging.info('%f: hit' % log.start_time)
-  for t in range(log.start_time, log.end_time + 1):
-    if t != log.start_time:
-      logging.info('%f: continued at %f **********************************************************' % (log.start_time, t) )
-      logging.info('log.start_time = %f, log.end_time = %f' % (log.start_time, log.end_time) )
+  start = int(math.floor(log.start_time))
+  end = int(math.ceil(log.end_time))
+  for t in range(start, end + 1):
+    if t != start:
+      logging.info('%d: continued at %d **********************************************************' % (start, t) )
+      logging.info('log.start_time = %f (start = %d), log.end_time = %f (end = %d)' % (log.start_time, start, log.end_time, end) )
     yield(t, '[0, 1]')
-  
+
 
 def my_graph_reduce(key, values):
   """My reduce function."""
